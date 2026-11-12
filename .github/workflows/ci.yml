@@ -46,8 +46,12 @@ jobs:
           rootfs="$RUNNER_TEMP/bubbleterm-rootfs"
           mkdir -p "$rootfs/bin" "$rootfs/proc" "$rootfs/dev" "$rootfs/tmp"
           install -m 0755 "$(command -v busybox)" "$rootfs/bin/busybox"
-          "$rootfs/bin/busybox" --install -s "$rootfs/bin"
+          # Use relative applet links: absolute links would resolve against the
+          # host filesystem after Bubblewrap pivots into this minimal rootfs.
+          ln -sfn busybox "$rootfs/bin/sh"
+          ln -sfn busybox "$rootfs/bin/sleep"
           test -x "$rootfs/bin/sh"
+          test -x "$rootfs/bin/sleep"
           echo "BUBBLETERM_TEST_BWRAP_ROOTFS=$rootfs" >> "$GITHUB_ENV"
       - name: Tests
         run: cargo test --workspace
