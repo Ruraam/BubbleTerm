@@ -433,7 +433,10 @@ mod tests {
     #[test]
     fn altgr_modifier_snapshot_selects_third_level_unicode_symbol() {
         let mut keyboard = keyboard_with_layouts("de");
-        let keymap = keyboard.keymap.as_ref().expect("keymap should be installed");
+        let keymap = keyboard
+            .keymap
+            .as_ref()
+            .expect("keymap should be installed");
         let mod5 = keymap.mod_get_index("Mod5");
         assert_ne!(mod5, xkb::MOD_INVALID);
         let altgr_mask = 1_u32 << mod5;
