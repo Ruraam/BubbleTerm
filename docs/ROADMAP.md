@@ -19,7 +19,7 @@
 
 ## 0.3 — Rendering
 
-- [ ] Establish GPU renderer and explicit software fallback behavior.
+- [x] Add safely bounded, resize-aware Wayland SHM placeholder buffers and compositor-release tracking.\n- [ ] Establish GPU renderer and explicit software fallback behavior.
 - [ ] Add font shaping, glyph atlas, HiDPI, and frame scheduling.
 - [ ] Benchmark large output and long-running sessions.
 
