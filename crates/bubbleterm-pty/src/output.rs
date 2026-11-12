@@ -144,7 +144,10 @@ mod tests {
         {
             let remaining = deadline.saturating_duration_since(std::time::Instant::now());
             assert!(!remaining.is_zero(), "child output timed out");
-            match output.recv_timeout(remaining).expect("output event timed out") {
+            match output
+                .recv_timeout(remaining)
+                .expect("output event timed out")
+            {
                 PtyOutputEvent::Data(chunk) => bytes.extend_from_slice(&chunk),
                 PtyOutputEvent::Closed => panic!("PTY closed before expected output arrived"),
                 PtyOutputEvent::Error(error) => panic!("PTY reader failed: {error}"),
