@@ -68,7 +68,10 @@ impl PtySession {
     /// Update the kernel PTY winsize. The kernel sends SIGWINCH to the
     /// foreground process group attached to the controlling terminal.
     pub fn resize(&self, size: PtySize) -> Result<()> {
-        anyhow::ensure!(size.rows > 0 && size.cols > 0, "PTY rows and columns must be non-zero");
+        anyhow::ensure!(
+            size.rows > 0 && size.cols > 0,
+            "PTY rows and columns must be non-zero"
+        );
         self.master.resize(size)?;
         Ok(())
     }
@@ -121,10 +124,16 @@ mod tests {
         };
 
         let session = PtySession::spawn(&spec, initial).expect("PTY should spawn");
-        assert_eq!(session.size().expect("PTY size should be readable"), initial);
+        assert_eq!(
+            session.size().expect("PTY size should be readable"),
+            initial
+        );
 
         session.resize(resized).expect("PTY resize should succeed");
-        assert_eq!(session.size().expect("PTY size should be readable"), resized);
+        assert_eq!(
+            session.size().expect("PTY size should be readable"),
+            resized
+        );
     }
 
     #[test]
