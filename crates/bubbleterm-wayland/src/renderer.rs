@@ -137,7 +137,7 @@ fn draw_cell(target: &mut RenderTarget, x: u32, y: u32, metrics: CellMetrics, ce
     // BASIC_FONTS is embedded in the binary. Unsupported Unicode currently
     // receives a visible replacement glyph rather than depending on host fonts.
     let character = cell.text.chars().next().unwrap_or(' ');
-    let Some(glyph) = BASIC_FONTS.get(character).or_else(|| BASIC_FONTS.get('?')) else {
+    let Some(glyph) = glyph_bitmap(character) else {
         return;
     };
 
@@ -168,6 +168,62 @@ fn draw_cell(target: &mut RenderTarget, x: u32, y: u32, metrics: CellMetrics, ce
     if cell.underline && metrics.height > 1 {
         let underline_y = y + metrics.height - 2;
         target.fill_rect(x, underline_y, metrics.width, 1, foreground);
+    }
+}
+
+
+/// Resolve common terminal Unicode drawing characters without host fonts.
+/// ASCII uses the embedded font; box drawing and block elements are generated
+/// as compact 8x8 bitmaps. Other unsupported codepoints use a visible fallback.
+fn glyph_bitmap(character: char) -> Option<[u8; 8]> {
+    if let Some(glyph) = BASIC_FONTS.get(character) {
+        return Some(*glyph);
+    }
+
+    let mut rows = [0_u8; 8];
+    let box_directions = match character {
+        '─' => Some((false, false, true, true)),
+        '│' => Some((true, true, false, false)),
+        '┌' => Some((false, true, false, true)),
+        '┐' => Some((false, true, true, false)),
+        '└' => Some((true, false, false, true)),
+        '┘' => Some((true, false, true, false)),
+        '├' => Some((true, true, false, true)),
+        '┤' => Some((true, true, true, false)),
+        '┬' => Some((false, true, true, true)),
+        '┴' => Some((true, false, true, true)),
+        '┼' => Some((true, true, true, true)),
+        _ => None,
+    };
+
+    if let Some((up, down, left, right)) = box_directions {
+        if up {
+            rows[..4].fill(0x18);
+        }
+        if down {
+            rows[4..].fill(0x18);
+        }
+        for row in &mut rows[3..5] {
+            if left {
+                *row |= 0x0f;
+            }
+            if right {
+                *row |= 0xf0;
+            }
+        }
+        return Some(rows);
+    }
+
+    match character {
+        '█' => Some([0xff; 8]),
+        '▀' => Some([0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0]),
+        '▄' => Some([0, 0, 0, 0, 0xff, 0xff, 0xff, 0xff]),
+        '▌' => Some([0xf0; 8]),
+        '▐' => Some([0x0f; 8]),
+        '░' => Some([0x11, 0x44, 0x11, 0x44, 0x11, 0x44, 0x11, 0x44]),
+        '▒' => Some([0x55, 0xaa, 0x55, 0xaa, 0x55, 0xaa, 0x55, 0xaa]),
+        '▓' => Some([0xee, 0xbb, 0xee, 0xbb, 0xee, 0xbb, 0xee, 0xbb]),
+        _ => BASIC_FONTS.get('?').copied(),
     }
 }
 
