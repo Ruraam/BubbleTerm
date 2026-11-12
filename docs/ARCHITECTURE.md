@@ -32,7 +32,7 @@ The initial crates are intentionally small. Dependencies will be introduced behi
 
 ## PTY execution modes
 
-Every terminal session is created from a backend-independent `LaunchSpec`. The PTY backend supports two execution modes:
+Every terminal session is created from a backend-independent `LaunchSpec` containing a `ShellKind`. The PTY backend supports two execution modes:
 
 1. **Host** — launch the selected shell as the current user.
 2. **Sandbox** — launch the selected shell through Bubblewrap (`bwrap`) using an explicit `SandboxConfig`.
