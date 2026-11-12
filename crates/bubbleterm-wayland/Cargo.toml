@@ -12,6 +12,7 @@ bubbleterm-pty = { path = "../bubbleterm-pty" }
 bubbleterm-vt = { path = "../bubbleterm-vt" }
 portable-pty = "0.9.0"
 tempfile = "3.10"
+font8x8 = "0.3.1"
 wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client"] }
 xkbcommon = "0.8"
