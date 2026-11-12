@@ -3,6 +3,7 @@
 
 pub mod keyboard;
 pub mod resize;
+mod renderer;
 pub mod window;
 
 pub use resize::{CellMetrics, SurfaceSize, pty_size_for_surface, resize_pty_for_surface};
