@@ -8,9 +8,7 @@
 use std::io::{Read, Write};
 
 use anyhow::Result;
-use portable_pty::{
-    Child, CommandBuilder, ExitStatus, MasterPty, PtySize, native_pty_system,
-};
+use portable_pty::{Child, CommandBuilder, ExitStatus, MasterPty, PtySize, native_pty_system};
 
 use crate::{LaunchSpec, ShellKind};
 
@@ -191,7 +189,10 @@ mod tests {
         let ready_deadline = std::time::Instant::now() + Duration::from_secs(3);
         while !output.windows(5).any(|window| window == b"READY") {
             let remaining = ready_deadline.saturating_duration_since(std::time::Instant::now());
-            assert!(!remaining.is_zero(), "child did not confirm its controlling TTY");
+            assert!(
+                !remaining.is_zero(),
+                "child did not confirm its controlling TTY"
+            );
             let chunk = rx.recv_timeout(remaining).expect("PTY output timed out");
             output.extend_from_slice(&chunk);
         }
@@ -203,8 +204,13 @@ mod tests {
         let winch_deadline = std::time::Instant::now() + Duration::from_secs(3);
         while !output.windows(5).any(|window| window == b"WINCH") {
             let remaining = winch_deadline.saturating_duration_since(std::time::Instant::now());
-            assert!(!remaining.is_zero(), "foreground process group did not receive SIGWINCH");
-            let chunk = rx.recv_timeout(remaining).expect("SIGWINCH response timed out");
+            assert!(
+                !remaining.is_zero(),
+                "foreground process group did not receive SIGWINCH"
+            );
+            let chunk = rx
+                .recv_timeout(remaining)
+                .expect("SIGWINCH response timed out");
             output.extend_from_slice(&chunk);
         }
 
