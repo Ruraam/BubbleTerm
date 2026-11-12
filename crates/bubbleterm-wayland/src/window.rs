@@ -451,12 +451,8 @@ impl Dispatch<xdg_surface::XdgSurface, ()> for WindowState {
 
             state.current_size = (width, height);
             state.configured = true;
-            if let Err(error) = present_surface_buffer(
-                state,
-                size.width,
-                size.height,
-                queue_handle,
-            ) {
+            if let Err(error) = present_surface_buffer(state, size.width, size.height, queue_handle)
+            {
                 state.event_error = Some(error.to_string());
                 state.running = false;
             }
