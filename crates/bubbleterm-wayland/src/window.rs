@@ -389,6 +389,10 @@ impl KeyboardLifecycle {
     }
 }
 
+fn supports_xkb_keymap(format: WEnum<wl_keyboard::KeymapFormat>) -> bool {
+    format == WEnum::Value(wl_keyboard::KeymapFormat::XkbV1)
+}
+
 fn has_keyboard_capability(capabilities: WEnum<wl_seat::Capability>) -> bool {
     match capabilities {
         WEnum::Value(capabilities) => capabilities.contains(wl_seat::Capability::Keyboard),
@@ -435,15 +439,15 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WindowState {
     ) {
         match event {
             wl_keyboard::Event::Keymap { format, fd, size } => {
-                if format == WEnum::Value(wl_keyboard::KeymapFormat::XkbV1) {
+                if supports_xkb_keymap(format) {
                     state.key_repeat.clear();
                     if let Err(error) = state.xkb.install_keymap(fd, size) {
                         state.event_error = Some(error.to_string());
                         state.running = false;
                     }
-                } else if format == WEnum::Value(wl_keyboard::KeymapFormat::NoKeymap) {
-                    // The compositor explicitly revoked the keymap. Do not
-                    // keep translating or repeating with stale layout data.
+                } else {
+                    // NoKeymap and any future/unknown format are unsupported.
+                    // Never keep translating with a stale compositor keymap.
                     state.key_repeat.clear();
                     state.xkb.clear_keymap();
                 }
@@ -591,6 +595,7 @@ impl Dispatch<xdg_toplevel::XdgToplevel, ()> for WindowState {
 mod tests {
     use super::{
         CapabilityChange, KeyboardLifecycle, checked_buffer_layout, has_keyboard_capability,
+        supports_xkb_keymap,
     };
     use wayland_client::WEnum;
     use wayland_client::protocol::wl_seat;
@@ -655,6 +660,17 @@ mod tests {
         );
         assert!(!lifecycle.leave());
         assert!(!lifecycle.enter());
+    }
+
+    #[test]
+    fn rejects_missing_and_unknown_keymap_formats() {
+        assert!(supports_xkb_keymap(WEnum::Value(
+            wl_keyboard::KeymapFormat::XkbV1
+        )));
+        assert!(!supports_xkb_keymap(WEnum::Value(
+            wl_keyboard::KeymapFormat::NoKeymap
+        )));
+        assert!(!supports_xkb_keymap(WEnum::Unknown(2)));
     }
 
     #[test]
