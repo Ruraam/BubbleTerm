@@ -62,7 +62,6 @@ pub fn run_wayland_window(session: PtySession, cell_metrics: CellMetrics) -> Res
         retired_buffers: Vec::new(),
         pending_size: None,
         current_size: (INITIAL_WIDTH as i32, INITIAL_HEIGHT as i32),
-        configured: false,
         running: true,
         resize_error: None,
     };
@@ -112,12 +111,9 @@ fn create_surface_buffer(
     let pool_size = i32::try_from(byte_len).context("Wayland SHM pool exceeds i32")?;
 
     let mut file = tempfile::tempfile().context("could not create Wayland SHM backing file")?;
-    let mut pixels = vec![0x18; byte_len as usize];
-    for alpha in pixels.iter_mut().skip(3).step_by(4) {
-        *alpha = 0xff;
-    }
     // Keep a slightly blue-tinted neutral background without depending on a
     // renderer or GPU being available.
+    let mut pixels = vec![0x18; byte_len as usize];
     for pixel in pixels.chunks_exact_mut(4) {
         pixel.copy_from_slice(&BACKGROUND_PIXEL);
     }
@@ -148,7 +144,6 @@ struct WindowState {
     retired_buffers: Vec<wl_buffer::WlBuffer>,
     pending_size: Option<(i32, i32)>,
     current_size: (i32, i32),
-    configured: bool,
     running: bool,
     resize_error: Option<String>,
 }
@@ -218,6 +213,7 @@ impl Dispatch<xdg_surface::XdgSurface, ()> for WindowState {
         xdg_surface: &xdg_surface::XdgSurface,
         event: xdg_surface::Event,
         _: &(),
+        _: &Connection,
         queue_handle: &QueueHandle<Self>,
     ) {
         if let xdg_surface::Event::Configure { serial } = event {
@@ -264,7 +260,6 @@ impl Dispatch<xdg_surface::XdgSurface, ()> for WindowState {
                 state.surface.attach(Some(buffer), 0, 0);
                 state.surface.damage(0, 0, width, height);
             }
-            state.configured = true;
             state.surface.commit();
         }
     }
