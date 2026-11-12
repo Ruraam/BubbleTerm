@@ -469,7 +469,7 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WindowState {
                         .xkb
                         .update_modifiers(mods_depressed, mods_latched, mods_locked, group);
                 }
-            },
+            }
             wl_keyboard::Event::RepeatInfo { rate, delay } => {
                 state.key_repeat.configure(rate, delay, Instant::now());
             }
