@@ -218,7 +218,7 @@ impl Terminal {
 
 #[cfg(test)]
 mod tests {
-    use super::{GridSize, MAX_GRID_CELLS, Terminal, TerminalColor, TerminalError};
+    use super::{GridSize, Terminal, TerminalColor, TerminalError};
 
     fn terminal(columns: u16, rows: u16) -> Terminal {
         Terminal::new(GridSize::new(columns, rows).unwrap(), 100)
