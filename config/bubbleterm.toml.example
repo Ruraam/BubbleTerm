@@ -13,6 +13,25 @@ scrollback_lines = 10000
 cursor_blink = true
 copy_on_select = false
 
+# Session execution policy.
+# "host" launches the shell as the current user.
+# "sandbox" requests Bubblewrap isolation; it must never silently fall back to host.
+[session]
+execution = "host"
+
+[session.sandbox]
+bwrap = "bwrap"
+network = "isolated" # "isolated" or "host"
+private_pid = true
+private_ipc = true
+private_uts = true
+private_tmp = true
+# Add only paths the session genuinely needs. Mounts are explicit.
+# [[session.sandbox.mounts]]
+# source = "/home/user/Projects"
+# destination = "/workspace"
+# access = "read-write" # or "read-only"
+
 [font]
 family = "JetBrains Mono"
 size = 12.0
