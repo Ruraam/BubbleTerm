@@ -140,7 +140,7 @@ fn draw_cell(target: &mut RenderTarget, x: u32, y: u32, metrics: CellMetrics, ce
     let character = cell.text.nfc().next().unwrap_or(' ');
     if !character.is_ascii()
         && !is_custom_unicode_glyph(character)
-        && draw_noto_glyph(target, x, y, metrics, character, foreground)
+        && draw_noto_glyph(target, x, y, metrics, character, foreground, cell.bold)
     {
         if cell.underline && metrics.height > 1 {
             let underline_y = y + metrics.height - 2;
@@ -183,6 +183,18 @@ fn draw_cell(target: &mut RenderTarget, x: u32, y: u32, metrics: CellMetrics, ce
     }
 }
 
+/// Select the closest bundled raster height without upscaling a smaller glyph.
+fn noto_raster_height(cell_height: u32) -> noto_sans_mono_bitmap::RasterHeight {
+    use noto_sans_mono_bitmap::RasterHeight;
+
+    match cell_height {
+        0..=16 => RasterHeight::Size16,
+        17..=20 => RasterHeight::Size20,
+        21..=24 => RasterHeight::Size24,
+        _ => RasterHeight::Size32,
+    }
+}
+
 /// Render a bundled Noto Sans Mono glyph into the current terminal cell.
 fn draw_noto_glyph(
     target: &mut RenderTarget,
@@ -191,10 +203,13 @@ fn draw_noto_glyph(
     metrics: CellMetrics,
     character: char,
     foreground: (u8, u8, u8),
+    bold: bool,
 ) -> bool {
     use noto_sans_mono_bitmap::{FontWeight, RasterHeight, get_raster};
 
-    let Some(glyph) = get_raster(character, FontWeight::Regular, RasterHeight::Size16) else {
+    let weight = if bold { FontWeight::Bold } else { FontWeight::Regular };
+    let raster_height = noto_raster_height(metrics.height);
+    let Some(glyph) = get_raster(character, weight, raster_height) else {
         return false;
     };
     let raster = glyph.raster();
@@ -441,6 +456,30 @@ mod tests {
                 .any(|pixel| pixel[0..3] != [32, 24, 24]),
             "accented glyph should paint visible pixels"
         );
+    }
+
+    #[test]
+    fn noto_raster_selection_tracks_terminal_cell_height() {
+        use noto_sans_mono_bitmap::RasterHeight;
+
+        assert!(matches!(noto_raster_height(8), RasterHeight::Size16));
+        assert!(matches!(noto_raster_height(16), RasterHeight::Size16));
+        assert!(matches!(noto_raster_height(18), RasterHeight::Size20));
+        assert!(matches!(noto_raster_height(22), RasterHeight::Size24));
+        assert!(matches!(noto_raster_height(32), RasterHeight::Size32));
+        assert!(matches!(noto_raster_height(64), RasterHeight::Size32));
+    }
+
+    #[test]
+    fn bundled_noto_bold_glyphs_are_available() {
+        use noto_sans_mono_bitmap::{FontWeight, RasterHeight, get_raster};
+
+        for character in ['é', 'Ā', 'Œ'] {
+            assert!(
+                get_raster(character, FontWeight::Bold, RasterHeight::Size16).is_some(),
+                "bold bundled font should contain {character:?}"
+            );
+        }
     }
 
     #[test]
