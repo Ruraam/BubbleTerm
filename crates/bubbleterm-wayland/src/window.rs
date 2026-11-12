@@ -387,6 +387,11 @@ impl KeyboardLifecycle {
     fn leave(&mut self) -> bool {
         std::mem::replace(&mut self.focused, false)
     }
+
+    /// Whether keyboard input may be consumed for the currently focused surface.
+    fn accepts_input(&self) -> bool {
+        self.available && self.focused
+    }
 }
 
 fn supports_xkb_keymap(format: WEnum<wl_keyboard::KeymapFormat>) -> bool {
@@ -458,9 +463,13 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WindowState {
                 mods_locked,
                 group,
                 ..
-            } => state
-                .xkb
-                .update_modifiers(mods_depressed, mods_latched, mods_locked, group),
+            } => {
+                if state.keyboard_lifecycle.accepts_input() {
+                    state
+                        .xkb
+                        .update_modifiers(mods_depressed, mods_latched, mods_locked, group);
+                }
+            },
             wl_keyboard::Event::RepeatInfo { rate, delay } => {
                 state.key_repeat.configure(rate, delay, Instant::now());
             }
@@ -469,24 +478,32 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WindowState {
                 state: WEnum::Value(wl_keyboard::KeyState::Pressed),
                 ..
             } => {
-                let application_cursor = state.terminal.application_cursor();
-                if let Some(bytes) = state.xkb.translate(key, application_cursor) {
-                    if let Some(writer) = state.pty_writer.as_mut() {
-                        if let Err(error) = writer.write_all(&bytes).and_then(|_| writer.flush()) {
-                            state.event_error = Some(error.to_string());
-                            state.running = false;
+                if state.keyboard_lifecycle.accepts_input() {
+                    let application_cursor = state.terminal.application_cursor();
+                    if let Some(bytes) = state.xkb.translate(key, application_cursor) {
+                        if let Some(writer) = state.pty_writer.as_mut() {
+                            if let Err(error) =
+                                writer.write_all(&bytes).and_then(|_| writer.flush())
+                            {
+                                state.event_error = Some(error.to_string());
+                                state.running = false;
+                            }
                         }
                     }
+                    state
+                        .key_repeat
+                        .press(key, state.xkb.is_repeatable(key), Instant::now());
                 }
-                state
-                    .key_repeat
-                    .press(key, state.xkb.is_repeatable(key), Instant::now());
             }
             wl_keyboard::Event::Key {
                 key,
                 state: WEnum::Value(wl_keyboard::KeyState::Released),
                 ..
-            } => state.key_repeat.release(key),
+            } => {
+                if state.keyboard_lifecycle.accepts_input() {
+                    state.key_repeat.release(key);
+                }
+            }
             wl_keyboard::Event::Enter { .. } => {
                 // A fresh modifier snapshot follows focus entry. Do not carry
                 // repeat state across surfaces or duplicate Enter events.
@@ -647,6 +664,24 @@ mod tests {
         assert!(!lifecycle.enter());
         assert!(lifecycle.leave());
         assert!(!lifecycle.leave());
+    }
+
+    #[test]
+    fn input_is_accepted_only_while_keyboard_is_available_and_focused() {
+        let mut lifecycle = KeyboardLifecycle::default();
+        assert!(!lifecycle.accepts_input());
+
+        lifecycle.update_capability(true);
+        assert!(!lifecycle.accepts_input());
+
+        assert!(lifecycle.enter());
+        assert!(lifecycle.accepts_input());
+
+        lifecycle.leave();
+        assert!(!lifecycle.accepts_input());
+
+        lifecycle.update_capability(false);
+        assert!(!lifecycle.accepts_input());
     }
 
     #[test]
