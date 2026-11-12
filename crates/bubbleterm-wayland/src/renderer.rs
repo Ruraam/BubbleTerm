@@ -446,7 +446,7 @@ mod tests {
     #[test]
     fn decomposed_latin_accents_render_like_precomposed_glyphs() {
         let mut decomposed = Terminal::new(GridSize::new(1, 1).unwrap(), 0).unwrap();
-        decomposed.process("e\\u{301}".as_bytes());
+        decomposed.process("e\u{301}".as_bytes());
 
         let mut precomposed = Terminal::new(GridSize::new(1, 1).unwrap(), 0).unwrap();
         precomposed.process("é".as_bytes());
@@ -455,6 +455,7 @@ mod tests {
         let precomposed_image = render_snapshot(&precomposed.snapshot(), 8, 8, metrics()).unwrap();
         assert_eq!(decomposed_image, precomposed_image);
     }
+
     #[test]
     fn unsupported_unicode_uses_visible_replacement_glyph() {
         let fallback = glyph_bitmap('?').expect("replacement glyph must exist");
