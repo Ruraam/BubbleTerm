@@ -310,6 +310,7 @@ impl Dispatch<xdg_surface::XdgSurface, ()> for WindowState {
         xdg_surface: &xdg_surface::XdgSurface,
         event: xdg_surface::Event,
         _: &(),
+        _: &Connection,
         queue_handle: &QueueHandle<Self>,
     ) {
         if let xdg_surface::Event::Configure { serial } = event {
