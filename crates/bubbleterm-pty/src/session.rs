@@ -37,7 +37,7 @@ impl PtySession {
         command.args(command_spec.args.iter());
         command.set_controlling_tty(true);
 
-        if matches!(spec.kind, ShellKind::Host) {
+        if matches!(&spec.kind, ShellKind::Host) {
             if let Some(directory) = &spec.working_directory {
                 command.cwd(directory.as_os_str());
             }
