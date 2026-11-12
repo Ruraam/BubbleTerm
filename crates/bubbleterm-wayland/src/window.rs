@@ -152,6 +152,14 @@ pub fn run_wayland_window(session: PtySession, cell_metrics: CellMetrics) -> Res
 
 /// Emit at most one due repeat per event-loop iteration.
 fn dispatch_key_repeat(state: &mut WindowState) {
+    // Repeat is valid only while this surface owns keyboard focus. Keep this
+    // guard here as a final boundary in addition to clearing state on Leave
+    // and seat capability removal.
+    if !state.keyboard_lifecycle.accepts_input() {
+        state.key_repeat.clear();
+        return;
+    }
+
     let Some(key) = state.key_repeat.take_due(Instant::now()) else {
         return;
     };
