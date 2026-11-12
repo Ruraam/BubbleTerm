@@ -237,9 +237,15 @@ mod tests {
 
     #[test]
     fn rejects_excessively_large_grid() {
-        let columns = u16::try_from(MAX_GRID_CELLS).unwrap();
         assert_eq!(
-            Terminal::new(GridSize { columns, rows: 2 }, 0).err(),
+            Terminal::new(
+                GridSize {
+                    columns: u16::MAX,
+                    rows: 17,
+                },
+                0
+            )
+            .err(),
             Some(TerminalError::GridTooLarge)
         );
     }
