@@ -159,7 +159,7 @@ mod tests {
     fn spec(kind: ShellKind) -> LaunchSpec {
         LaunchSpec {
             shell: PathBuf::from("/bin/bash"),
-            args: vec![OsString::from("--login")],
+            args: vec![OsString::from("--login"), OsString::from("-i")],
             working_directory: Some(PathBuf::from("/workspace")),
             environment: BTreeMap::from([(
                 OsString::from("TERM"),
@@ -170,35 +170,106 @@ mod tests {
     }
 
     #[test]
-    fn host_launch_executes_shell_directly() {
+    fn host_command_is_exact_direct_exec_without_wrapper() {
         let command = spec(ShellKind::Host).command_spec().unwrap();
+
         assert_eq!(command.program, PathBuf::from("/bin/bash"));
-        assert_eq!(command.args, vec![OsString::from("--login")]);
+        assert_eq!(
+            command.args,
+            vec![OsString::from("--login"), OsString::from("-i")]
+        );
+        assert!(!command.args.iter().any(|arg| arg == "bwrap"));
     }
 
     #[test]
-    fn bubble_launch_uses_bwrap_and_rootfs_bind() {
+    fn bubble_read_only_command_has_exact_namespace_mount_and_exec_arguments() {
         let command = spec(ShellKind::Bubble {
             rootfs: PathBuf::from("/var/lib/bubbleos/rootfs"),
             read_only: true,
         })
         .command_spec()
         .unwrap();
+
         assert_eq!(command.program, PathBuf::from("bwrap"));
-        assert!(command.args.windows(3).any(|w| {
-            w == [OsString::from("--ro-bind"), OsString::from("/var/lib/bubbleos/rootfs"), OsString::from("/")]
-        }));
-        assert!(command.args.contains(&OsString::from("--unshare-net")));
-        assert_eq!(command.args.last(), Some(&OsString::from("--login")));
+        assert_eq!(
+            command.args,
+            vec![
+                "--die-with-parent",
+                "--new-session",
+                "--unshare-pid",
+                "--unshare-ipc",
+                "--unshare-uts",
+                "--unshare-net",
+                "--ro-bind",
+                "/var/lib/bubbleos/rootfs",
+                "/",
+                "--proc",
+                "/proc",
+                "--dev",
+                "/dev",
+                "--tmpfs",
+                "/tmp",
+                "--chdir",
+                "/workspace",
+                "--setenv",
+                "TERM",
+                "xterm-256color",
+                "--",
+                "/bin/bash",
+                "--login",
+                "-i",
+            ]
+            .into_iter()
+            .map(OsString::from)
+            .collect::<Vec<_>>()
+        );
     }
 
     #[test]
-    fn writable_bubble_rootfs_uses_bind() {
+    fn writable_bubble_command_uses_bind_not_read_only_bind() {
         let command = spec(ShellKind::Bubble {
             rootfs: PathBuf::from("/opt/bubble/rootfs"),
             read_only: false,
-        }).command_spec().unwrap();
-        assert!(command.args.contains(&OsString::from("--bind")));
+        })
+        .command_spec()
+        .unwrap();
+
+        assert!(command.args.windows(3).any(|args| {
+            args == [
+                OsString::from("--bind"),
+                OsString::from("/opt/bubble/rootfs"),
+                OsString::from("/"),
+            ]
+        }));
+        assert!(!command.args.iter().any(|arg| arg == "--ro-bind"));
+    }
+
+    #[test]
+    fn bubble_command_preserves_shell_arguments_after_separator() {
+        let mut launch = spec(ShellKind::Bubble {
+            rootfs: PathBuf::from("/opt/bubble/rootfs"),
+            read_only: true,
+        });
+        launch.args = vec![
+            OsString::from("-c"),
+            OsString::from("printf '%s' 'a b'"),
+        ];
+
+        let command = launch.command_spec().unwrap();
+        let separator = command
+            .args
+            .iter()
+            .position(|arg| arg == "--")
+            .expect("bwrap command must contain an execution separator");
+
+        assert_eq!(
+            &command.args[separator + 1..],
+            &[
+                OsString::from("/bin/bash"),
+                OsString::from("-c"),
+                OsString::from("printf '%s' 'a b'"),
+            ]
+        );
     }
 
     #[test]
