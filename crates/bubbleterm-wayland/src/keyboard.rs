@@ -291,6 +291,87 @@ mod tests {
     use super::*;
     use std::time::Instant;
 
+    fn keyboard_with_compose_table(contents: &str) -> XkbKeyboard {
+        let mut keyboard = XkbKeyboard::new().expect("XKB context should be available");
+        let table = xkb::compose::Table::new_from_buffer(
+            &keyboard.context,
+            contents,
+            "C",
+            xkb::compose::FORMAT_TEXT_V1,
+            xkb::compose::COMPILE_NO_FLAGS,
+        )
+        .expect("test Compose table should compile");
+        let state = xkb::compose::State::new(&table, xkb::compose::STATE_NO_FLAGS);
+        keyboard._compose_table = Some(table);
+        keyboard.compose_state = Some(state);
+        keyboard
+    }
+
+    const TEST_COMPOSE_TABLE: &str = r#"
+<dead_acute> <e> : "é" U00E9
+<Multi_key> <o> <c> : "©" U00A9
+"#;
+
+    #[test]
+    fn dead_acute_composes_with_e() {
+        let mut keyboard = keyboard_with_compose_table(TEST_COMPOSE_TABLE);
+
+        assert_eq!(
+            keyboard.translate_text(xkb::Keysym::dead_acute, String::new()),
+            None
+        );
+        assert_eq!(
+            keyboard.translate_text(xkb::Keysym::e, "e".to_owned()),
+            Some("é".as_bytes().to_vec())
+        );
+    }
+
+    #[test]
+    fn multi_key_sequence_emits_composed_unicode() {
+        let mut keyboard = keyboard_with_compose_table(TEST_COMPOSE_TABLE);
+
+        assert_eq!(
+            keyboard.translate_text(xkb::Keysym::Multi_key, String::new()),
+            None
+        );
+        assert_eq!(
+            keyboard.translate_text(xkb::Keysym::o, "o".to_owned()),
+            None
+        );
+        assert_eq!(
+            keyboard.translate_text(xkb::Keysym::c, "c".to_owned()),
+            Some("©".as_bytes().to_vec())
+        );
+    }
+
+    #[test]
+    fn cancelled_compose_sequence_falls_back_and_resets() {
+        let mut keyboard = keyboard_with_compose_table(TEST_COMPOSE_TABLE);
+
+        assert_eq!(
+            keyboard.translate_text(xkb::Keysym::dead_acute, String::new()),
+            None
+        );
+        assert_eq!(
+            keyboard.translate_text(xkb::Keysym::x, "x".to_owned()),
+            Some(b"x".to_vec())
+        );
+        assert_eq!(
+            keyboard.translate_text(xkb::Keysym::e, "e".to_owned()),
+            Some(b"e".to_vec())
+        );
+    }
+
+    #[test]
+    fn ordinary_unicode_text_is_preserved() {
+        let mut keyboard = keyboard_with_compose_table(TEST_COMPOSE_TABLE);
+
+        assert_eq!(
+            keyboard.translate_text(xkb::Keysym::eacute, "é".to_owned()),
+            Some("é".as_bytes().to_vec())
+        );
+    }
+
     #[test]
     fn key_repeat_obeys_delay_rate_and_release() {
         let start = Instant::now();
