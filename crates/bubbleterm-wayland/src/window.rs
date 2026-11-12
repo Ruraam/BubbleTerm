@@ -425,7 +425,15 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WindowState {
                 state: WEnum::Value(wl_keyboard::KeyState::Released),
                 ..
             } => state.key_repeat.release(key),
-            wl_keyboard::Event::Leave { .. } => state.key_repeat.clear(),
+            wl_keyboard::Event::Enter { .. } => {
+                // A fresh modifier snapshot follows focus entry. Do not carry
+                // repeat state across surfaces or focus transitions.
+                state.key_repeat.clear();
+            }
+            wl_keyboard::Event::Leave { .. } => {
+                state.key_repeat.clear();
+                state.xkb.clear_modifiers();
+            }
             _ => {}
         }
     }
