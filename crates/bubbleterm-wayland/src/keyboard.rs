@@ -390,6 +390,24 @@ mod tests {
     }
 
     #[test]
+    fn clear_keymap_discards_compose_and_disables_translation() {
+        let mut keyboard = keyboard_with_compose_table(TEST_COMPOSE_TABLE);
+
+        assert_eq!(
+            keyboard.translate_text(xkb::Keysym::dead_acute, String::new()),
+            None
+        );
+        keyboard.clear_keymap();
+
+        assert!(!keyboard.is_ready());
+        assert_eq!(keyboard.translate(30, false), None);
+        assert_eq!(
+            keyboard.translate_text(xkb::Keysym::e, "e".to_owned()),
+            Some(b"e".to_vec())
+        );
+    }
+
+    #[test]
     fn key_repeat_obeys_delay_rate_and_release() {
         let start = Instant::now();
         let mut repeat = KeyRepeat::default();
