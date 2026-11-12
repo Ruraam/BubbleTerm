@@ -10,7 +10,7 @@
 
 ## 0.2 — Terminal core
 
-- [ ] Integrate a mature VT engine behind an internal adapter.
+- [x] Integrate the maintained vt100 parser behind a renderer-independent adapter.
 - [x] Add PTY lifecycle management and bounded I/O.
 - [x] Implement PTY winsize updates and kernel SIGWINCH regression tests.
 - [x] Add Wayland surface-to-PTY resize conversion and validation.
@@ -24,7 +24,7 @@
 ## 0.3 — Rendering
 
 - [x] Add safely bounded, resize-aware Wayland SHM placeholder buffers and compositor-release tracking.
-- [ ] Connect PTY output to the VT parser and terminal grid.
+- [ ] Connect the PTY reader stream to the VT parser and terminal grid (reader/event-loop bridge pending).
 - [ ] Establish GPU renderer and explicit software fallback behavior.
 - [ ] Add font shaping, glyph atlas, HiDPI, and frame scheduling.
 - [ ] Benchmark large output and long-running sessions.
