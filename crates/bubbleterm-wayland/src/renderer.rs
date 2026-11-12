@@ -306,9 +306,8 @@ mod tests {
     #[test]
     fn embedded_glyphs_cover_ascii_box_drawing_blocks_and_shades() {
         let supported = [
-            'A', '0', '?',
-            '─', '│', '┌', '┐', '└', '┘', '├', '┤', '┬', '┴', '┼',
-            '█', '▀', '▄', '▌', '▐', '░', '▒', '▓',
+            'A', '0', '?', '─', '│', '┌', '┐', '└', '┘', '├', '┤', '┬', '┴', '┼', '█', '▀', '▄',
+            '▌', '▐', '░', '▒', '▓',
         ];
 
         for character in supported {
