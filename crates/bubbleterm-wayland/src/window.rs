@@ -444,6 +444,11 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WindowState {
     ) {
         match event {
             wl_keyboard::Event::Keymap { format, fd, size } => {
+                // A destroyed keyboard proxy may still have queued events.
+                // Do not let those events restore a keymap after seat removal.
+                if !state.keyboard_lifecycle.available {
+                    return;
+                }
                 if supports_xkb_keymap(format) {
                     state.key_repeat.clear();
                     if let Err(error) = state.xkb.install_keymap(fd, size) {
@@ -471,7 +476,9 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WindowState {
                 }
             }
             wl_keyboard::Event::RepeatInfo { rate, delay } => {
-                state.key_repeat.configure(rate, delay, Instant::now());
+                if state.keyboard_lifecycle.available {
+                    state.key_repeat.configure(rate, delay, Instant::now());
+                }
             }
             wl_keyboard::Event::Key {
                 key,
