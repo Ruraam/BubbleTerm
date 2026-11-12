@@ -535,11 +535,16 @@ mod tests {
                 &terminal.snapshot(),
                 16,
                 16,
-                CellMetrics { width: 8, height: 16 },
+                CellMetrics {
+                    width: 8,
+                    height: 16,
+                },
             )
             .unwrap();
             assert!(
-                image.chunks_exact(4).any(|pixel| pixel[0..3] != [32, 24, 24]),
+                image
+                    .chunks_exact(4)
+                    .any(|pixel| pixel[0..3] != [32, 24, 24]),
                 "Unicode glyph {character:?} should render visible pixels"
             );
         }
