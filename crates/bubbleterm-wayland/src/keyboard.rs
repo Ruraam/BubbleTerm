@@ -21,8 +21,7 @@ pub struct XkbKeyboard {
 impl XkbKeyboard {
     /// Creates an XKB context. A keymap is installed after wl_keyboard sends it.
     pub fn new() -> Result<Self> {
-        let context =
-            XkbContext::new(xkb::CONTEXT_NO_FLAGS).context("could not create the XKB context")?;
+        let context = XkbContext::new(xkb::CONTEXT_NO_FLAGS);
         Ok(Self {
             context,
             state: None,
@@ -73,25 +72,25 @@ impl XkbKeyboard {
     /// Converts an evdev keycode (as sent by wl_keyboard) to terminal bytes.
     /// Returns None until a valid keymap is installed or for non-text keys.
     pub fn translate(&self, evdev_keycode: u32) -> Option<Vec<u8>> {
-        let keycode = evdev_keycode.checked_add(XKB_EVDEV_OFFSET)?;
+        let keycode = xkb::Keycode::new(evdev_keycode.checked_add(XKB_EVDEV_OFFSET)?);
         let state = self.state.as_ref()?;
         let keysym = state.key_get_one_sym(keycode);
 
         let sequence: &[u8] = match keysym {
-            xkb::KEY_Return | xkb::KEY_KP_Enter => b"\r",
-            xkb::KEY_BackSpace => b"\x7f",
-            xkb::KEY_Tab => b"\t",
-            xkb::KEY_Escape => b"\x1b",
-            xkb::KEY_Up => b"\x1b[A",
-            xkb::KEY_Down => b"\x1b[B",
-            xkb::KEY_Right => b"\x1b[C",
-            xkb::KEY_Left => b"\x1b[D",
-            xkb::KEY_Home => b"\x1b[H",
-            xkb::KEY_End => b"\x1b[F",
-            xkb::KEY_Insert => b"\x1b[2~",
-            xkb::KEY_Delete => b"\x1b[3~",
-            xkb::KEY_Page_Up => b"\x1b[5~",
-            xkb::KEY_Page_Down => b"\x1b[6~",
+            xkb::Keysym::Return | xkb::Keysym::KP_Enter => b"\r",
+            xkb::Keysym::BackSpace => b"\x7f",
+            xkb::Keysym::Tab => b"\t",
+            xkb::Keysym::Escape => b"\x1b",
+            xkb::Keysym::Up => b"\x1b[A",
+            xkb::Keysym::Down => b"\x1b[B",
+            xkb::Keysym::Right => b"\x1b[C",
+            xkb::Keysym::Left => b"\x1b[D",
+            xkb::Keysym::Home => b"\x1b[H",
+            xkb::Keysym::End => b"\x1b[F",
+            xkb::Keysym::Insert => b"\x1b[2~",
+            xkb::Keysym::Delete => b"\x1b[3~",
+            xkb::Keysym::Page_Up => b"\x1b[5~",
+            xkb::Keysym::Page_Down => b"\x1b[6~",
             _ => {
                 let text = state.key_get_utf8(keycode);
                 if text.is_empty() {
