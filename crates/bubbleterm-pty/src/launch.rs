@@ -252,10 +252,7 @@ mod tests {
             rootfs: PathBuf::from("/opt/bubble/rootfs"),
             read_only: true,
         });
-        launch.args = vec![
-            OsString::from("-c"),
-            OsString::from("printf '%s' 'a b'"),
-        ];
+        launch.args = vec![OsString::from("-c"), OsString::from("printf '%s' 'a b'")];
 
         let command = launch.command_spec().unwrap();
         let separator = command
