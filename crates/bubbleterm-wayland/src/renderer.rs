@@ -304,6 +304,36 @@ mod tests {
     }
 
     #[test]
+    fn embedded_glyphs_cover_ascii_box_drawing_blocks_and_shades() {
+        let supported = [
+            'A', '0', '?',
+            '─', '│', '┌', '┐', '└', '┘', '├', '┤', '┬', '┴', '┼',
+            '█', '▀', '▄', '▌', '▐', '░', '▒', '▓',
+        ];
+
+        for character in supported {
+            let bitmap = glyph_bitmap(character)
+                .unwrap_or_else(|| panic!("missing bitmap for {character:?}"));
+            assert!(
+                bitmap.iter().any(|row| *row != 0),
+                "glyph {character:?} must contain visible pixels"
+            );
+        }
+    }
+
+    #[test]
+    fn unsupported_unicode_uses_visible_replacement_glyph() {
+        let fallback = glyph_bitmap('?').expect("replacement glyph must exist");
+        for character in ['界', 'Ж', '🙂', '\u{0301}'] {
+            assert_eq!(
+                glyph_bitmap(character),
+                Some(fallback),
+                "unsupported character {character:?} should use the replacement glyph"
+            );
+        }
+    }
+
+    #[test]
     fn maps_ansi_rgb_foreground_to_bgra() {
         let mut terminal = Terminal::new(GridSize::new(1, 1).unwrap(), 0).unwrap();
         terminal.process(b"\x1b[38;2;12;34;56mX");
