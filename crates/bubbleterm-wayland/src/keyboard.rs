@@ -4,7 +4,12 @@
 //! the keymap fd it sends and applies modifier snapshots from wl_keyboard;
 //! it never assumes a US layout or updates modifier state from raw key events.
 
-use std::{fs::File, io::Read, os::fd::OwnedFd};
+use std::{
+    fs::File,
+    io::Read,
+    os::fd::OwnedFd,
+    time::{Duration, Instant},
+};
 
 use anyhow::{Context, Result, ensure};
 use xkbcommon::xkb::{self, Context as XkbContext, Keymap, State};
@@ -15,6 +20,7 @@ const XKB_EVDEV_OFFSET: u32 = 8;
 /// Stateful translator for the compositor-provided XKB keymap.
 pub struct XkbKeyboard {
     context: XkbContext,
+    keymap: Option<Keymap>,
     state: Option<State>,
 }
 
@@ -24,6 +30,7 @@ impl XkbKeyboard {
         let context = XkbContext::new(xkb::CONTEXT_NO_FLAGS);
         Ok(Self {
             context,
+            keymap: None,
             state: None,
         })
     }
@@ -59,6 +66,7 @@ impl XkbKeyboard {
         .context("could not compile the compositor-provided XKB keymap")?;
 
         self.state = Some(State::new(&keymap));
+        self.keymap = Some(keymap);
         Ok(())
     }
 
@@ -130,6 +138,20 @@ impl XkbKeyboard {
     /// Clears the active keymap when the seat loses keyboard capability.
     pub fn clear_keymap(&mut self) {
         self.state = None;
+        self.keymap = None;
+    }
+
+    /// Whether the active XKB keymap marks this evdev key as repeatable.
+    pub fn is_repeatable(&self, evdev_keycode: u32) -> bool {
+        let Some(keycode) = evdev_keycode
+            .checked_add(XKB_EVDEV_OFFSET)
+            .map(xkb::Keycode::new)
+        else {
+            return false;
+        };
+        self.keymap
+            .as_ref()
+            .is_some_and(|keymap| keymap.key_repeats(keycode))
     }
 
     /// Whether a compositor keymap has been installed.
@@ -138,9 +160,103 @@ impl XkbKeyboard {
     }
 }
 
+
+/// Client-side implementation of the repeat timing advertised by wl_keyboard.
+#[derive(Debug, Default)]
+pub struct KeyRepeat {
+    rate: u32,
+    delay: Duration,
+    active_key: Option<u32>,
+    next_at: Option<Instant>,
+}
+
+impl KeyRepeat {
+    /// Updates the compositor-provided repeat rate and initial delay.
+    /// A zero rate disables repeat; invalid negative values are treated as disabled.
+    pub fn configure(&mut self, rate: i32, delay_ms: i32, now: Instant) {
+        self.rate = u32::try_from(rate).unwrap_or(0);
+        self.delay = Duration::from_millis(u64::try_from(delay_ms).unwrap_or(0));
+        self.next_at = if self.rate > 0 && self.active_key.is_some() {
+            Some(now + self.delay)
+        } else {
+            None
+        };
+        if self.rate == 0 {
+            self.active_key = None;
+        }
+    }
+
+    /// Starts repeating a pressed key only when XKB says it is repeatable.
+    pub fn press(&mut self, key: u32, repeatable: bool, now: Instant) {
+        if repeatable && self.rate > 0 {
+            self.active_key = Some(key);
+            self.next_at = Some(now + self.delay);
+        } else {
+            self.clear();
+        }
+    }
+
+    /// Stops repeating when the active physical key is released.
+    pub fn release(&mut self, key: u32) {
+        if self.active_key == Some(key) {
+            self.clear();
+        }
+    }
+
+    /// Clears repeat state on focus loss, keymap replacement, or seat removal.
+    pub fn clear(&mut self) {
+        self.active_key = None;
+        self.next_at = None;
+    }
+
+    /// Returns one due key repeat and schedules the next interval without catch-up bursts.
+    pub fn take_due(&mut self, now: Instant) -> Option<u32> {
+        let key = self.active_key?;
+        let deadline = self.next_at?;
+        if now < deadline {
+            return None;
+        }
+
+        let interval = Duration::from_nanos(1_000_000_000_u64 / u64::from(self.rate).max(1));
+        self.next_at = Some(now + interval.max(Duration::from_nanos(1)));
+        Some(key)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Instant;
+
+
+    #[test]
+    fn key_repeat_obeys_delay_rate_and_release() {
+        let start = Instant::now();
+        let mut repeat = KeyRepeat::default();
+        repeat.configure(20, 500, start);
+        repeat.press(30, true, start);
+
+        assert_eq!(repeat.take_due(start + Duration::from_millis(499)), None);
+        assert_eq!(repeat.take_due(start + Duration::from_millis(500)), Some(30));
+        assert_eq!(repeat.take_due(start + Duration::from_millis(549)), None);
+        assert_eq!(repeat.take_due(start + Duration::from_millis(550)), Some(30));
+
+        repeat.release(30);
+        assert_eq!(repeat.take_due(start + Duration::from_secs(2)), None);
+    }
+
+    #[test]
+    fn key_repeat_ignores_non_repeatable_keys_and_zero_rate() {
+        let start = Instant::now();
+        let mut repeat = KeyRepeat::default();
+        repeat.configure(25, 300, start);
+        repeat.press(42, false, start);
+        assert_eq!(repeat.take_due(start + Duration::from_secs(1)), None);
+
+        repeat.press(30, true, start);
+        repeat.configure(0, 300, start);
+        assert_eq!(repeat.take_due(start + Duration::from_secs(1)), None);
+    }
 
     #[test]
     fn starts_without_a_keymap() {
