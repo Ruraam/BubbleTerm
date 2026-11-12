@@ -1,145 +1,138 @@
-//! Declarative process launch policy.
+//! Declarative shell selection and safe command construction for PTY sessions.
 //!
-//! This module deliberately describes intent; it does not construct a shell
-//! command line. The backend must pass every argument as an OS argument (never
-//! through `sh -c`) and must fail closed when sandboxing is requested but
-//! Bubblewrap or a required namespace is unavailable.
+//! Bubble mode invokes Bubblewrap directly with OS arguments. No intermediate
+//! shell is used, and a requested sandbox is never downgraded to host mode.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-/// Execution environment requested for a terminal session.
+/// Shell execution target. BubbleOS root filesystems are mounted at /.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ExecutionMode {
-    /// Run the selected shell as the current user on the host.
+pub enum ShellKind {
+    /// Execute the shell directly on the host.
     Host,
-    /// Run the selected shell inside a Bubblewrap-created namespace.
-    Sandbox(SandboxConfig),
+    /// Execute the shell inside a Bubblewrap root filesystem.
+    Bubble { rootfs: PathBuf, read_only: bool },
 }
 
-/// Network access available inside a sandbox.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NetworkPolicy {
-    /// Do not create a network namespace; networking remains available.
-    Host,
-    /// Create a private network namespace with no host network access.
-    Isolated,
-}
-
-/// How a host path is exposed inside the sandbox.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SandboxMountKind {
-    ReadOnly,
-    ReadWrite,
-}
-
-/// An explicit host-to-sandbox path mapping.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SandboxMount {
-    pub source: PathBuf,
-    pub destination: PathBuf,
-    pub kind: SandboxMountKind,
-}
-
-/// Bubblewrap policy. No host filesystem paths are exposed implicitly by this
-/// structure; the backend supplies only the minimal runtime mounts it needs.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SandboxConfig {
-    /// Executable name or absolute path for Bubblewrap.
-    pub bwrap_program: PathBuf,
-    /// Whether the sandbox receives host networking.
-    pub network: NetworkPolicy,
-    /// Additional explicit filesystem mappings.
-    pub mounts: Vec<SandboxMount>,
-    /// Create a private PID namespace.
-    pub private_pid: bool,
-    /// Create a private IPC namespace.
-    pub private_ipc: bool,
-    /// Create a private UTS namespace.
-    pub private_uts: bool,
-    /// Mount a fresh temporary directory at /tmp.
-    pub private_tmp: bool,
-}
-
-impl Default for SandboxConfig {
-    fn default() -> Self {
-        Self {
-            bwrap_program: PathBuf::from("bwrap"),
-            network: NetworkPolicy::Isolated,
-            mounts: Vec::new(),
-            private_pid: true,
-            private_ipc: true,
-            private_uts: true,
-            private_tmp: true,
-        }
-    }
-}
-
-/// Complete, backend-independent description of a shell session.
+/// Complete description of a shell session.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LaunchSpec {
+    /// Shell executable. In Bubble mode this is a path inside the rootfs.
     pub shell: PathBuf,
     pub args: Vec<OsString>,
+    /// Working directory on the host in Host mode, inside rootfs in Bubble mode.
     pub working_directory: Option<PathBuf>,
     pub environment: BTreeMap<OsString, OsString>,
-    pub mode: ExecutionMode,
+    pub kind: ShellKind,
+}
+
+/// Program and arguments to pass directly to the process-spawn API.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandSpec {
+    pub program: PathBuf,
+    pub args: Vec<OsString>,
 }
 
 impl LaunchSpec {
-    /// Reject malformed launch policies before allocating a PTY or spawning.
+    /// Validate inputs before allocating a PTY or spawning a process.
     pub fn validate(&self) -> Result<(), LaunchSpecError> {
         if self.shell.as_os_str().is_empty() {
             return Err(LaunchSpecError::EmptyShell);
         }
 
-        if let ExecutionMode::Sandbox(config) = &self.mode {
-            if config.bwrap_program.as_os_str().is_empty() {
-                return Err(LaunchSpecError::EmptyBubblewrapProgram);
+        if let ShellKind::Bubble { rootfs, .. } = &self.kind {
+            if !rootfs.is_absolute() {
+                return Err(LaunchSpecError::RootfsNotAbsolute(rootfs.clone()));
             }
-
-            for mount in &config.mounts {
-                if !mount.source.is_absolute() {
-                    return Err(LaunchSpecError::MountSourceNotAbsolute(
-                        mount.source.clone(),
-                    ));
-                }
-                if !mount.destination.is_absolute() {
-                    return Err(LaunchSpecError::MountDestinationNotAbsolute(
-                        mount.destination.clone(),
-                    ));
+            if rootfs == &PathBuf::from("/") {
+                return Err(LaunchSpecError::RootfsCannotBeHostRoot);
+            }
+            if !self.shell.is_absolute() {
+                return Err(LaunchSpecError::BubbleShellNotAbsolute(self.shell.clone()));
+            }
+            if let Some(directory) = &self.working_directory {
+                if !directory.is_absolute() {
+                    return Err(LaunchSpecError::WorkingDirectoryNotAbsolute(directory.clone()));
                 }
             }
         }
 
         Ok(())
     }
+
+    /// Build a direct-exec command. This does not spawn it.
+    ///
+    /// Bubble mode creates private PID/IPC/UTS/network namespaces, mounts the
+    /// supplied rootfs at /, and provides fresh /proc, /dev, and /tmp.
+    /// The rootfs itself is read-only unless read_only is false.
+    pub fn command_spec(&self) -> Result<CommandSpec, LaunchSpecError> {
+        self.validate()?;
+
+        match &self.kind {
+            ShellKind::Host => Ok(CommandSpec {
+                program: self.shell.clone(),
+                args: self.args.clone(),
+            }),
+            ShellKind::Bubble { rootfs, read_only } => {
+                let mut args = vec![
+                    OsString::from("--die-with-parent"),
+                    OsString::from("--new-session"),
+                    OsString::from("--unshare-pid"),
+                    OsString::from("--unshare-ipc"),
+                    OsString::from("--unshare-uts"),
+                    OsString::from("--unshare-net"),
+                    OsString::from("--proc"),
+                    OsString::from("/proc"),
+                    OsString::from("--dev"),
+                    OsString::from("/dev"),
+                    OsString::from("--tmpfs"),
+                    OsString::from("/tmp"),
+                    OsString::from(if *read_only { "--ro-bind" } else { "--bind" }),
+                    rootfs.as_os_str().to_owned(),
+                    OsString::from("/"),
+                ];
+
+                if let Some(directory) = &self.working_directory {
+                    args.push(OsString::from("--chdir"));
+                    args.push(directory.as_os_str().to_owned());
+                }
+
+                for (key, value) in &self.environment {
+                    args.push(OsString::from("--setenv"));
+                    args.push(key.clone());
+                    args.push(value.clone());
+                }
+
+                args.push(OsString::from("--"));
+                args.push(self.shell.as_os_str().to_owned());
+                args.extend(self.args.iter().cloned());
+
+                Ok(CommandSpec { program: PathBuf::from("bwrap"), args })
+            }
+        }
+    }
 }
 
-/// Invalid launch configuration.
+/// Invalid shell launch configuration.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LaunchSpecError {
     EmptyShell,
-    EmptyBubblewrapProgram,
-    MountSourceNotAbsolute(PathBuf),
-    MountDestinationNotAbsolute(PathBuf),
+    RootfsNotAbsolute(PathBuf),
+    RootfsCannotBeHostRoot,
+    BubbleShellNotAbsolute(PathBuf),
+    WorkingDirectoryNotAbsolute(PathBuf),
 }
 
 impl std::fmt::Display for LaunchSpecError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::EmptyShell => formatter.write_str("shell executable cannot be empty"),
-            Self::EmptyBubblewrapProgram => {
-                formatter.write_str("Bubblewrap executable cannot be empty")
-            }
-            Self::MountSourceNotAbsolute(path) => {
-                write!(formatter, "sandbox mount source must be absolute: {}", path.display())
-            }
-            Self::MountDestinationNotAbsolute(path) => write!(
-                formatter,
-                "sandbox mount destination must be absolute: {}",
-                path.display()
-            ),
+            Self::EmptyShell => f.write_str("shell executable cannot be empty"),
+            Self::RootfsNotAbsolute(path) => write!(f, "BubbleOS rootfs must be absolute: {}", path.display()),
+            Self::RootfsCannotBeHostRoot => f.write_str("BubbleOS rootfs cannot be the host root directory"),
+            Self::BubbleShellNotAbsolute(path) => write!(f, "sandbox shell path must be absolute: {}", path.display()),
+            Self::WorkingDirectoryNotAbsolute(path) => write!(f, "working directory must be absolute: {}", path.display()),
         }
     }
 }
@@ -150,42 +143,59 @@ impl std::error::Error for LaunchSpecError {}
 mod tests {
     use super::*;
 
-    fn host_spec() -> LaunchSpec {
+    fn spec(kind: ShellKind) -> LaunchSpec {
         LaunchSpec {
-            shell: PathBuf::from("/bin/sh"),
-            args: vec![OsString::from("-l")],
-            working_directory: None,
-            environment: BTreeMap::new(),
-            mode: ExecutionMode::Host,
+            shell: PathBuf::from("/bin/bash"),
+            args: vec![OsString::from("--login")],
+            working_directory: Some(PathBuf::from("/workspace")),
+            environment: BTreeMap::from([(OsString::from("TERM"), OsString::from("xterm-256color"))]),
+            kind,
         }
     }
 
     #[test]
-    fn accepts_host_shell() {
-        assert!(host_spec().validate().is_ok());
+    fn host_launch_executes_shell_directly() {
+        let command = spec(ShellKind::Host).command_spec().unwrap();
+        assert_eq!(command.program, PathBuf::from("/bin/bash"));
+        assert_eq!(command.args, vec![OsString::from("--login")]);
     }
 
     #[test]
-    fn rejects_empty_shell() {
-        let mut spec = host_spec();
-        spec.shell = PathBuf::new();
-        assert_eq!(spec.validate(), Err(LaunchSpecError::EmptyShell));
+    fn bubble_launch_uses_bwrap_and_rootfs_bind() {
+        let command = spec(ShellKind::Bubble {
+            rootfs: PathBuf::from("/var/lib/bubbleos/rootfs"),
+            read_only: true,
+        }).command_spec().unwrap();
+        assert_eq!(command.program, PathBuf::from("bwrap"));
+        assert!(command.args.windows(3).any(|w| {
+            w == [OsString::from("--ro-bind"), OsString::from("/var/lib/bubbleos/rootfs"), OsString::from("/")]
+        }));
+        assert!(command.args.contains(&OsString::from("--unshare-net")));
+        assert_eq!(command.args.last(), Some(&OsString::from("--login")));
     }
 
     #[test]
-    fn rejects_relative_sandbox_mounts() {
-        let mut spec = host_spec();
-        spec.mode = ExecutionMode::Sandbox(SandboxConfig {
-            mounts: vec![SandboxMount {
-                source: PathBuf::from("relative"),
-                destination: PathBuf::from("/workspace"),
-                kind: SandboxMountKind::ReadOnly,
-            }],
-            ..SandboxConfig::default()
-        });
-        assert!(matches!(
-            spec.validate(),
-            Err(LaunchSpecError::MountSourceNotAbsolute(_))
-        ));
+    fn writable_bubble_rootfs_uses_bind() {
+        let command = spec(ShellKind::Bubble {
+            rootfs: PathBuf::from("/opt/bubble/rootfs"),
+            read_only: false,
+        }).command_spec().unwrap();
+        assert!(command.args.contains(&OsString::from("--bind")));
+    }
+
+    #[test]
+    fn rejects_relative_rootfs() {
+        assert_eq!(
+            spec(ShellKind::Bubble { rootfs: PathBuf::from("rootfs"), read_only: true }).validate(),
+            Err(LaunchSpecError::RootfsNotAbsolute(PathBuf::from("rootfs")))
+        );
+    }
+
+    #[test]
+    fn rejects_host_root_as_bubble_rootfs() {
+        assert_eq!(
+            spec(ShellKind::Bubble { rootfs: PathBuf::from("/"), read_only: true }).validate(),
+            Err(LaunchSpecError::RootfsCannotBeHostRoot)
+        );
     }
 }
