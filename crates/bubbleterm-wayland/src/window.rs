@@ -264,12 +264,9 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WindowState {
                 mods_locked,
                 group,
                 ..
-            } => state.xkb.update_modifiers(
-                mods_depressed,
-                mods_latched,
-                mods_locked,
-                group,
-            ),
+            } => state
+                .xkb
+                .update_modifiers(mods_depressed, mods_latched, mods_locked, group),
             wl_keyboard::Event::Key {
                 key,
                 state: key_state,
