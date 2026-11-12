@@ -152,7 +152,11 @@ fn draw_cell(target: &mut RenderTarget, x: u32, y: u32, metrics: CellMetrics, ce
     let normalized: String = cell.text.nfc().collect();
     let mut characters = normalized.chars();
     let first = characters.next().unwrap_or(' ');
-    let character = if is_combining_diacritic(first) { '◌' } else { first };
+    let character = if is_combining_diacritic(first) {
+        '◌'
+    } else {
+        first
+    };
     let mut combining_marks = Vec::new();
     if is_combining_diacritic(first) {
         combining_marks.push(first);
