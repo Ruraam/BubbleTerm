@@ -9,6 +9,9 @@ license.workspace = true
 anyhow = "1.0"
 bubbleterm-pty = { path = "../bubbleterm-pty" }
 portable-pty = "0.9.0"
+tempfile = "3.10"
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client"] }
 
 [lints]
 workspace = true
