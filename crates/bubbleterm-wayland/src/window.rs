@@ -230,9 +230,7 @@ impl Dispatch<wl_seat::WlSeat, ()> for WindowState {
     ) {
         if let wl_seat::Event::Capabilities { capabilities } = event {
             let has_keyboard = match capabilities {
-                WEnum::Value(capabilities) => {
-                    capabilities.contains(wl_seat::Capability::Keyboard)
-                }
+                WEnum::Value(capabilities) => capabilities.contains(wl_seat::Capability::Keyboard),
                 WEnum::Unknown(raw) => raw & 0b010 != 0,
             };
             if has_keyboard && state.keyboard.is_none() {
