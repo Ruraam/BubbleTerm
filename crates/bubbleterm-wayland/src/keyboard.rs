@@ -201,9 +201,10 @@ impl KeyRepeat {
         if repeatable && self.rate > 0 {
             self.active_key = Some(key);
             self.next_at = Some(now + self.delay);
-        } else {
-            self.clear();
         }
+        // A non-repeatable key (for example Shift or Ctrl) must not cancel
+        // an already-held repeatable key. Its modifier state is applied by
+        // XKB and will affect subsequent repeat translations.
     }
 
     /// Stops repeating when the active physical key is released.
@@ -271,6 +272,25 @@ mod tests {
         repeat.press(30, true, start);
         repeat.configure(0, 300, start);
         assert_eq!(repeat.take_due(start + Duration::from_secs(1)), None);
+    }
+
+    #[test]
+    fn modifier_press_does_not_cancel_an_active_repeat() {
+        let start = Instant::now();
+        let mut repeat = KeyRepeat::default();
+        repeat.configure(20, 400, start);
+        repeat.press(30, true, start);
+        repeat.press(42, false, start + Duration::from_millis(100));
+
+        assert_eq!(
+            repeat.take_due(start + Duration::from_millis(400)),
+            Some(30)
+        );
+        repeat.release(42);
+        assert_eq!(
+            repeat.take_due(start + Duration::from_millis(450)),
+            None
+        );
     }
 
     #[test]
