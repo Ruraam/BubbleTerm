@@ -205,7 +205,7 @@ fn draw_noto_glyph(
     foreground: (u8, u8, u8),
     bold: bool,
 ) -> bool {
-    use noto_sans_mono_bitmap::{FontWeight, RasterHeight, get_raster};
+    use noto_sans_mono_bitmap::{FontWeight, get_raster};
 
     let weight = if bold {
         FontWeight::Bold
