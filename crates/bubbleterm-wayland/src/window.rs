@@ -26,7 +26,9 @@ use wayland_client::{
 use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
 
 use crate::{
-    CellMetrics, SurfaceSize, keyboard::{KeyRepeat, XkbKeyboard}, renderer::render_snapshot,
+    CellMetrics, SurfaceSize,
+    keyboard::{KeyRepeat, XkbKeyboard},
+    renderer::render_snapshot,
     resize_pty_for_surface,
 };
 
@@ -151,7 +153,6 @@ pub fn run_wayland_window(session: PtySession, cell_metrics: CellMetrics) -> Res
     drop(seat);
     Ok(())
 }
-
 
 /// Emit at most one due repeat per event-loop iteration.
 fn dispatch_key_repeat(state: &mut WindowState) {
@@ -420,7 +421,9 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WindowState {
                         }
                     }
                 }
-                state.key_repeat.press(key, state.xkb.is_repeatable(key), Instant::now());
+                state
+                    .key_repeat
+                    .press(key, state.xkb.is_repeatable(key), Instant::now());
             }
             wl_keyboard::Event::Key {
                 key,
