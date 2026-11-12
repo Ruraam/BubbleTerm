@@ -277,6 +277,19 @@ mod tests {
     }
 
     #[test]
+    fn preserves_wide_cjk_cell_and_continuation_metadata() {
+        let mut terminal = terminal(4, 1);
+        terminal.process("界".as_bytes());
+
+        let snapshot = terminal.snapshot();
+        let lead = snapshot.cell(0, 0).unwrap();
+        let continuation = snapshot.cell(0, 1).unwrap();
+        assert_eq!(lead.text, "界");
+        assert!(lead.wide);
+        assert!(continuation.wide_continuation);
+    }
+
+    #[test]
     fn parses_sgr_colors_and_attributes() {
         let mut terminal = terminal(20, 2);
         terminal.process(b"\x1b[1;3;4;38;2;12;34;56mX");
