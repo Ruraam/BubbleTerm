@@ -137,6 +137,17 @@ fn draw_cell(target: &mut RenderTarget, x: u32, y: u32, metrics: CellMetrics, ce
     // BASIC_FONTS is embedded in the binary. Unsupported Unicode currently
     // receives a visible replacement glyph rather than depending on host fonts.
     let character = cell.text.chars().next().unwrap_or(' ');
+    if !character.is_ascii()
+        && !is_custom_unicode_glyph(character)
+        && draw_noto_glyph(target, x, y, metrics, character, foreground)
+    {
+        if cell.underline && metrics.height > 1 {
+            let underline_y = y + metrics.height - 2;
+            target.fill_rect(x, underline_y, metrics.width, 1, foreground);
+        }
+        return;
+    }
+
     let Some(glyph) = glyph_bitmap(character) else {
         return;
     };
@@ -169,6 +180,75 @@ fn draw_cell(target: &mut RenderTarget, x: u32, y: u32, metrics: CellMetrics, ce
         let underline_y = y + metrics.height - 2;
         target.fill_rect(x, underline_y, metrics.width, 1, foreground);
     }
+}
+
+/// Render a bundled Noto Sans Mono glyph into the current terminal cell.
+fn draw_noto_glyph(
+    target: &mut RenderTarget,
+    x: u32,
+    y: u32,
+    metrics: CellMetrics,
+    character: char,
+    foreground: (u8, u8, u8),
+) -> bool {
+    use noto_sans_mono_bitmap::{get_raster, FontWeight, RasterHeight};
+
+    let Some(glyph) = get_raster(character, FontWeight::Regular, RasterHeight::Size16) else {
+        return false;
+    };
+    let raster = glyph.raster();
+    let source_width = glyph.width();
+    let source_height = glyph.height();
+    if source_width == 0 || source_height == 0 || raster.len() != source_height {
+        return false;
+    }
+
+    let draw_width = metrics.width.min(source_width as u32);
+    let draw_height = metrics.height.min(source_height as u32);
+    let x_offset = (metrics.width - draw_width) / 2;
+    let y_offset = (metrics.height - draw_height) / 2;
+
+    for dy in 0..draw_height {
+        let source_y = (dy as usize * source_height) / draw_height as usize;
+        let row = raster[source_y];
+        if row.len() != source_width {
+            return false;
+        }
+        for dx in 0..draw_width {
+            let source_x = (dx as usize * source_width) / draw_width as usize;
+            let coverage = u16::from(row[source_x]);
+            if coverage == 0 {
+                continue;
+            }
+            let background_offset = (((y + y_offset + dy) * target.stride)
+                + ((x + x_offset + dx) * 4)) as usize;
+            if background_offset + 3 >= target.pixels.len() {
+                continue;
+            }
+            let bg = &target.pixels[background_offset..background_offset + 3];
+            let blend = |fg: u8, bg: u8| {
+                ((u16::from(fg) * coverage + u16::from(bg) * (255 - coverage)) / 255) as u8
+            };
+            target.set_pixel(
+                x + x_offset + dx,
+                y + y_offset + dy,
+                (
+                    blend(foreground.0, bg[2]),
+                    blend(foreground.1, bg[1]),
+                    blend(foreground.2, bg[0]),
+                ),
+            );
+        }
+    }
+    true
+}
+
+fn is_custom_unicode_glyph(character: char) -> bool {
+    matches!(
+        character,
+        '─' | '│' | '┌' | '┐' | '└' | '┘' | '├' | '┤' | '┬' | '┴' | '┼'
+            | '█' | '▀' | '▄' | '▌' | '▐' | '░' | '▒' | '▓'
+    )
 }
 
 /// Resolve common terminal Unicode drawing characters without host fonts.
@@ -318,6 +398,26 @@ mod tests {
                 "glyph {character:?} must contain visible pixels"
             );
         }
+    }
+
+    #[test]
+    fn bundled_noto_font_renders_precomposed_latin_unicode() {
+        use noto_sans_mono_bitmap::{get_raster, FontWeight, RasterHeight};
+
+        for character in ['é', 'à', 'ñ', 'Ā', 'Œ', '€'] {
+            assert!(
+                get_raster(character, FontWeight::Regular, RasterHeight::Size16).is_some(),
+                "bundled font should contain {character:?}"
+            );
+        }
+
+        let mut terminal = Terminal::new(GridSize::new(1, 1).unwrap(), 0).unwrap();
+        terminal.process("é".as_bytes());
+        let image = render_snapshot(&terminal.snapshot(), 8, 8, metrics()).unwrap();
+        assert!(
+            image.chunks_exact(4).any(|pixel| pixel[0..3] != [32, 24, 24]),
+            "accented glyph should paint visible pixels"
+        );
     }
 
     #[test]
