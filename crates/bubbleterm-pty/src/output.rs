@@ -33,7 +33,9 @@ pub enum PtyOutputEvent {
 /// consumer catches up.
 pub struct PtyOutputReader {
     receiver: Receiver<PtyOutputEvent>,
-    worker: Option<JoinHandle<()>>,
+    // Dropping JoinHandle detaches the worker; joining could block forever
+    // while the PTY read waits for the child to exit.
+    _worker: JoinHandle<()>,
 }
 
 impl PtyOutputReader {
@@ -50,7 +52,7 @@ impl PtyOutputReader {
 
         Ok(Self {
             receiver,
-            worker: Some(worker),
+            _worker: worker,
         })
     }
 
@@ -65,15 +67,6 @@ impl PtyOutputReader {
         timeout: Duration,
     ) -> std::result::Result<PtyOutputEvent, RecvTimeoutError> {
         self.receiver.recv_timeout(timeout)
-    }
-}
-
-impl Drop for PtyOutputReader {
-    fn drop(&mut self) {
-        // Dropping the receiver makes a blocked bounded-channel send fail.
-        // The worker is deliberately not joined: it may currently be blocked
-        // in the PTY read until the child exits and closes its slave side.
-        self.worker.take();
     }
 }
 
