@@ -207,7 +207,11 @@ fn draw_noto_glyph(
 ) -> bool {
     use noto_sans_mono_bitmap::{FontWeight, RasterHeight, get_raster};
 
-    let weight = if bold { FontWeight::Bold } else { FontWeight::Regular };
+    let weight = if bold {
+        FontWeight::Bold
+    } else {
+        FontWeight::Regular
+    };
     let raster_height = noto_raster_height(metrics.height);
     let Some(glyph) = get_raster(character, weight, raster_height) else {
         return false;
