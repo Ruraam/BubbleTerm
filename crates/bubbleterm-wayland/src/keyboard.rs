@@ -363,6 +363,23 @@ mod tests {
     }
 
     #[test]
+    fn focus_loss_resets_an_incomplete_compose_sequence() {
+        let mut keyboard = keyboard_with_compose_table(TEST_COMPOSE_TABLE);
+
+        assert_eq!(
+            keyboard.translate_text(xkb::Keysym::dead_acute, String::new()),
+            None
+        );
+
+        keyboard.clear_modifiers();
+
+        assert_eq!(
+            keyboard.translate_text(xkb::Keysym::e, "e".to_owned()),
+            Some(b"e".to_vec())
+        );
+    }
+
+    #[test]
     fn ordinary_unicode_text_is_preserved() {
         let mut keyboard = keyboard_with_compose_table(TEST_COMPOSE_TABLE);
 
