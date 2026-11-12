@@ -176,7 +176,7 @@ fn draw_cell(target: &mut RenderTarget, x: u32, y: u32, metrics: CellMetrics, ce
 /// as compact 8x8 bitmaps. Other unsupported codepoints use a visible fallback.
 fn glyph_bitmap(character: char) -> Option<[u8; 8]> {
     if let Some(glyph) = BASIC_FONTS.get(character) {
-        return Some(*glyph);
+        return Some(glyph);
     }
 
     let mut rows = [0_u8; 8];
@@ -222,7 +222,7 @@ fn glyph_bitmap(character: char) -> Option<[u8; 8]> {
         '░' => Some([0x11, 0x44, 0x11, 0x44, 0x11, 0x44, 0x11, 0x44]),
         '▒' => Some([0x55, 0xaa, 0x55, 0xaa, 0x55, 0xaa, 0x55, 0xaa]),
         '▓' => Some([0xee, 0xbb, 0xee, 0xbb, 0xee, 0xbb, 0xee, 0xbb]),
-        _ => BASIC_FONTS.get('?').copied(),
+        _ => BASIC_FONTS.get('?'),
     }
 }
 
