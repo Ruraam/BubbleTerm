@@ -348,7 +348,9 @@ mod tests {
             output.extend_from_slice(&chunk);
         }
 
-        session.kill().expect("Bubblewrap test child should be terminated");
+        session
+            .kill()
+            .expect("Bubblewrap test child should be terminated");
         let _ = session.wait();
     }
 }
