@@ -388,6 +388,11 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WindowState {
                         state.event_error = Some(error.to_string());
                         state.running = false;
                     }
+                } else if format == WEnum::Value(wl_keyboard::KeymapFormat::NoKeymap) {
+                    // The compositor explicitly revoked the keymap. Do not
+                    // keep translating or repeating with stale layout data.
+                    state.key_repeat.clear();
+                    state.xkb.clear_keymap();
                 }
             }
             wl_keyboard::Event::Modifiers {
