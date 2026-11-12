@@ -380,6 +380,28 @@ mod tests {
     }
 
     #[test]
+    fn resetting_partial_multi_key_sequence_prevents_stale_composition() {
+        let mut keyboard = keyboard_with_compose_table(TEST_COMPOSE_TABLE);
+
+        assert_eq!(
+            keyboard.translate_text(xkb::Keysym::Multi_key, String::new()),
+            None
+        );
+        assert_eq!(
+            keyboard.translate_text(xkb::Keysym::o, "o".to_owned()),
+            None
+        );
+
+        // Focus loss or a keymap transition must discard the partial sequence.
+        keyboard.reset_compose();
+
+        assert_eq!(
+            keyboard.translate_text(xkb::Keysym::c, "c".to_owned()),
+            Some(b"c".to_vec())
+        );
+    }
+
+    #[test]
     fn ordinary_unicode_text_is_preserved() {
         let mut keyboard = keyboard_with_compose_table(TEST_COMPOSE_TABLE);
 
