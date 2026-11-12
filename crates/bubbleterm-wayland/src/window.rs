@@ -28,7 +28,7 @@ const WINDOW_TITLE: &str = "BubbleTerm";
 /// The caller retains ownership of the PTY session. Configure sizes are
 /// interpreted as logical pixels at scale factor 1 until output/fractional
 /// scaling is implemented.
-pub fn run_wayland_window(session: &PtySession, cell_metrics: CellMetrics) -> Result<()> {
+pub fn run_wayland_window(session: PtySession, cell_metrics: CellMetrics) -> Result<()> {
     let connection = Connection::connect_to_env()
         .context("could not connect to the Wayland compositor (check WAYLAND_DISPLAY)")?;
     let (globals, mut event_queue) =
@@ -112,8 +112,8 @@ fn create_placeholder_buffer(
     Ok(buffer)
 }
 
-struct WindowState<'a> {
-    session: &'a PtySession,
+struct WindowState {
+    session: PtySession,
     cell_metrics: CellMetrics,
     surface: wl_surface::WlSurface,
     buffer: wl_buffer::WlBuffer,
@@ -123,7 +123,7 @@ struct WindowState<'a> {
     resize_error: Option<String>,
 }
 
-impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for WindowState<'_> {
+impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for WindowState {
     fn event(
         _: &mut Self,
         _: &wl_registry::WlRegistry,
@@ -141,7 +141,7 @@ delegate_noop!(WindowState: ignore wl_shm_pool::WlShmPool);
 delegate_noop!(WindowState: ignore wl_buffer::WlBuffer);
 delegate_noop!(WindowState: ignore wl_surface::WlSurface);
 
-impl Dispatch<xdg_wm_base::XdgWmBase, ()> for WindowState<'_> {
+impl Dispatch<xdg_wm_base::XdgWmBase, ()> for WindowState {
     fn event(
         _: &mut Self,
         wm_base: &xdg_wm_base::XdgWmBase,
@@ -156,7 +156,7 @@ impl Dispatch<xdg_wm_base::XdgWmBase, ()> for WindowState<'_> {
     }
 }
 
-impl Dispatch<xdg_surface::XdgSurface, ()> for WindowState<'_> {
+impl Dispatch<xdg_surface::XdgSurface, ()> for WindowState {
     fn event(
         state: &mut Self,
         xdg_surface: &xdg_surface::XdgSurface,
@@ -194,7 +194,7 @@ impl Dispatch<xdg_surface::XdgSurface, ()> for WindowState<'_> {
     }
 }
 
-impl Dispatch<xdg_toplevel::XdgToplevel, ()> for WindowState<'_> {
+impl Dispatch<xdg_toplevel::XdgToplevel, ()> for WindowState {
     fn event(
         state: &mut Self,
         _: &xdg_toplevel::XdgToplevel,
