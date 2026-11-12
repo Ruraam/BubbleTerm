@@ -296,7 +296,13 @@ mod tests {
             .expect("resize should succeed");
 
         let snapshot = terminal.snapshot();
-        assert_eq!(snapshot.size, GridSize { columns: 12, rows: 3 });
+        assert_eq!(
+            snapshot.size,
+            GridSize {
+                columns: 12,
+                rows: 3
+            }
+        );
         assert_eq!(snapshot.cell(0, 0).unwrap().text, "b");
         assert_eq!(snapshot.cells.len(), 36);
     }
