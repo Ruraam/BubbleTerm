@@ -32,20 +32,18 @@ The initial crates are intentionally small. Dependencies will be introduced behi
 
 ## PTY execution modes
 
-Every terminal session is created from a backend-independent `LaunchSpec` containing a `ShellKind`. The PTY backend supports two execution modes:
+Every terminal session is created from a backend-independent `LaunchSpec` containing a `ShellKind`:
 
 1. **Host** — launch the selected shell as the current user.
-2. **Sandbox** — launch the selected shell through Bubblewrap (`bwrap`) using an explicit `SandboxConfig`.
+2. **Bubble** — launch the selected shell through Bubblewrap (`bwrap`) with the configured rootfs mounted at `/`, read-only by default.
 
-The VT engine and UI consume the same PTY interface in both modes. They must not contain mode-specific process logic. Profiles may select the mode, and each session records the effective policy for diagnostics.
+`bubbleterm-pty` uses `portable-pty` for PTY allocation, process spawning, reader/writer handles, child lifecycle, and winsize updates. On Unix, its spawn path creates a new session and assigns the PTY slave as the child's controlling terminal with `TIOCSCTTY`. Bubble mode intentionally does not pass Bubblewrap's `--new-session`: creating another session after PTY setup would detach the controlling terminal and break normal job control and resize signal delivery.
 
-Sandbox policy is deny-by-default:
-- Network isolation is the default; host networking must be an explicit opt-in.
-- Filesystem access is granted through explicit read-only or read-write mounts.
-- PID, IPC, UTS, and temporary-directory isolation are independently represented.
-- The backend must pass arguments directly to process APIs, never interpolate them into a shell command.
-- If sandbox mode is requested and Bubblewrap, namespaces, or required mounts are unavailable, session creation fails. There is no silent fallback to a host shell.
-- The sandbox is a process/filesystem namespace boundary, not a complete virtual machine. It does not by itself provide a kernel security boundary against host-kernel vulnerabilities.
+The Wayland configure handler must translate the committed surface dimensions and current cell metrics into a `PtySize`, then call `PtySession::resize` on the corresponding PTY master. The kernel updates the slave's winsize and delivers `SIGWINCH` to the foreground process group; BubbleTerm should not send a second synthetic signal. The PTY resize API and kernel-winsize tests are present; wiring this call into a real Wayland event loop remains pending because the current Wayland crate is still only a foundation stub.
+
+The VT engine and UI consume the same PTY interface in both modes. They must not contain mode-specific process logic. Arguments are passed directly to process APIs; they are never interpolated into a shell command. If Bubble mode is requested and Bubblewrap or the required namespaces/mounts are unavailable, session creation must fail rather than silently falling back to a host shell.
+
+The sandbox is a process/filesystem namespace boundary, not a complete virtual machine. It does not by itself provide a kernel security boundary against host-kernel vulnerabilities.
 
 The launch policy is deliberately separate from the PTY transport. This keeps future backends (for example, a remote or container-backed session) possible without changing VT semantics.
 
