@@ -16,7 +16,10 @@ pub fn render_snapshot(
     height: u32,
     metrics: CellMetrics,
 ) -> Result<Vec<u8>> {
-    ensure!(width > 0 && height > 0, "render dimensions must be non-zero");
+    ensure!(
+        width > 0 && height > 0,
+        "render dimensions must be non-zero"
+    );
     ensure!(
         metrics.width > 0 && metrics.height > 0,
         "cell metrics must be non-zero"
@@ -32,10 +35,7 @@ pub fn render_snapshot(
     let byte_len = stride
         .checked_mul(height)
         .ok_or_else(|| anyhow::anyhow!("render buffer overflow"))?;
-    ensure!(
-        byte_len <= MAX_RENDER_BYTES,
-        "render buffer exceeds 64 MiB"
-    );
+    ensure!(byte_len <= MAX_RENDER_BYTES, "render buffer exceeds 64 MiB");
 
     let mut target = RenderTarget {
         pixels: vec![0; byte_len as usize],
@@ -119,24 +119,14 @@ impl RenderTarget {
     }
 }
 
-fn draw_cell(
-    target: &mut RenderTarget,
-    x: u32,
-    y: u32,
-    metrics: CellMetrics,
-    cell: &TerminalCell,
-) {
+fn draw_cell(target: &mut RenderTarget, x: u32, y: u32, metrics: CellMetrics, cell: &TerminalCell) {
     let mut foreground = resolve_color(cell.foreground, true, cell.bold);
     let mut background = resolve_color(cell.background, false, false);
     if cell.inverse {
         std::mem::swap(&mut foreground, &mut background);
     }
     if cell.dim {
-        foreground = (
-            foreground.0 / 2,
-            foreground.1 / 2,
-            foreground.2 / 2,
-        );
+        foreground = (foreground.0 / 2, foreground.1 / 2, foreground.2 / 2);
     }
 
     target.fill_rect(x, y, metrics.width, metrics.height, background);
@@ -147,10 +137,7 @@ fn draw_cell(
     // BASIC_FONTS is embedded in the binary. Unsupported Unicode currently
     // receives a visible replacement glyph rather than depending on host fonts.
     let character = cell.text.chars().next().unwrap_or(' ');
-    let Some(glyph) = BASIC_FONTS
-        .get(character)
-        .or_else(|| BASIC_FONTS.get('?'))
-    else {
+    let Some(glyph) = BASIC_FONTS.get(character).or_else(|| BASIC_FONTS.get('?')) else {
         return;
     };
 
@@ -162,11 +149,7 @@ fn draw_cell(
     for py in 0..glyph_height {
         let source_y = py * 8 / glyph_height;
         let bits = glyph[source_y as usize];
-        let italic_offset = if cell.italic {
-            (7 - source_y) / 3
-        } else {
-            0
-        };
+        let italic_offset = if cell.italic { (7 - source_y) / 3 } else { 0 };
         for px in 0..glyph_width {
             let source_x = px * 8 / glyph_width;
             if bits & (1 << source_x) == 0 {
