@@ -1,0 +1,50 @@
+# BubbleTerm — Bubble Glass defaults
+[general]
+# shell = "/bin/bash"
+# working_directory = "~"
+
+[window]
+# width = 1200
+# height = 800
+# opacity = 0.96
+
+[terminal]
+scrollback_lines = 10000
+cursor_blink = true
+copy_on_select = false
+
+[font]
+family = "JetBrains Mono"
+size = 12.0
+# ligatures = true
+
+[theme]
+id = "bubble-glass"
+variant = "dark"
+
+[colors]
+background = "#020617"
+surface = "#0A1530"
+surface_elevated = "#14123A"
+selection = "#1E40AF"
+text = "#E0F2FE"
+text_muted = "#94A3B8"
+accent = "#22D3EE"
+accent_secondary = "#38BDF8"
+accent_blue = "#60A5FA"
+accent_violet = "#818CF8"
+accent_glow = "#67E8F9"
+
+[gradient]
+start = "#22D3EE"
+middle_1 = "#38BDF8"
+middle_2 = "#60A5FA"
+end = "#818CF8"
+
+[effects]
+# Compositor blur is optional and compositor-specific.
+glass_enabled = true
+blur_enabled = false
+glow_enabled = true
+animations_enabled = true
+reduced_motion = false
