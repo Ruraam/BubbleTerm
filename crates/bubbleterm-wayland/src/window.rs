@@ -167,18 +167,16 @@ impl Dispatch<xdg_surface::XdgSurface, ()> for WindowState {
     ) {
         if let xdg_surface::Event::Configure { serial } = event {
             xdg_surface.ack_configure(serial);
-            let (width, height) = state.pending_size.take().unwrap_or((
-                INITIAL_WIDTH as i32,
-                INITIAL_HEIGHT as i32,
-            ));
+            let (width, height) = state
+                .pending_size
+                .take()
+                .unwrap_or((INITIAL_WIDTH as i32, INITIAL_HEIGHT as i32));
             if width > 0 && height > 0 {
                 let size = SurfaceSize {
                     width: width as u32,
                     height: height as u32,
                 };
-                if let Err(error) =
-                    resize_pty_for_surface(state.session, size, state.cell_metrics)
-                {
+                if let Err(error) = resize_pty_for_surface(state.session, size, state.cell_metrics) {
                     state.resize_error = Some(error.to_string());
                     state.running = false;
                     return;
