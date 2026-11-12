@@ -11,8 +11,10 @@
 ## 0.2 — Terminal core
 
 - [ ] Integrate a mature VT engine behind an internal adapter.
-- [ ] Add PTY lifecycle management and bounded I/O.
-- [ ] Implement resize, signals, child reaping, and scrollback tests.
+- [x] Add PTY lifecycle management and bounded I/O.
+- [x] Implement PTY winsize updates and kernel SIGWINCH regression tests.
+- [x] Add Wayland surface-to-PTY resize conversion and validation.
+- [ ] Wire the adapter into a live Wayland configure/commit event loop.
 - [ ] Add VT and PTY regression fixtures.
 
 ## 0.3 — Rendering
