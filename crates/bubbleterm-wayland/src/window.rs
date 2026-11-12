@@ -1,8 +1,8 @@
 //! Native Wayland window lifecycle, keyboard input, and PTY resize integration.
 //!
-//! The surface currently uses dynamically-sized shared-memory placeholder
-//! buffers. Keyboard input is translated using the compositor-provided XKB
-//! keymap. Terminal glyph rendering and fractional scaling remain future work.
+//! The surface uses dynamically-sized shared-memory buffers rendered from VT
+//! snapshots. Keyboard input is translated using the compositor-provided XKB
+//! keymap. Fractional scaling and a full Unicode font remain future work.
 
 use std::{io::Write, os::fd::AsFd, sync::mpsc::TryRecvError};
 
@@ -20,7 +20,10 @@ use wayland_client::{
 };
 use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
 
-use crate::{CellMetrics, SurfaceSize, keyboard::XkbKeyboard, renderer::render_snapshot, resize_pty_for_surface};
+use crate::{
+    CellMetrics, SurfaceSize, keyboard::XkbKeyboard, renderer::render_snapshot,
+    resize_pty_for_surface,
+};
 
 const INITIAL_WIDTH: u32 = 800;
 const INITIAL_HEIGHT: u32 = 600;
@@ -89,6 +92,7 @@ pub fn run_wayland_window(session: PtySession, cell_metrics: CellMetrics) -> Res
         pending_size: None,
         current_size: (INITIAL_WIDTH as i32, INITIAL_HEIGHT as i32),
         running: true,
+        configured: false,
         event_error: None,
     };
     state.pty_writer = Some(
@@ -105,7 +109,7 @@ pub fn run_wayland_window(session: PtySession, cell_metrics: CellMetrics) -> Res
         event_queue
             .dispatch_pending(&mut state)
             .context("Wayland pending-event dispatch failed")?;
-        if drain_pty_output(&mut state) {
+        if drain_pty_output(&mut state) && state.configured {
             let (width, height) = state.current_size;
             if width > 0 && height > 0 {
                 present_surface_buffer(&mut state, width as u32, height as u32, &queue_handle)?;
@@ -152,7 +156,7 @@ fn drain_pty_output(state: &mut WindowState) -> bool {
             Ok(PtyOutputEvent::Data(bytes)) => {
                 state.terminal.process(&bytes);
                 changed = true;
-            },
+            }
             Ok(PtyOutputEvent::Closed) => {
                 state.pty_closed = true;
                 break;
@@ -205,7 +209,10 @@ fn create_surface_buffer(
     queue_handle: &QueueHandle<WindowState>,
 ) -> Result<wl_buffer::WlBuffer> {
     let (width_i32, height_i32, stride_i32, pool_size) = checked_buffer_layout(width, height)?;
-    ensure!(pixels.len() == pool_size as usize, "rendered pixel buffer has an invalid length");
+    ensure!(
+        pixels.len() == pool_size as usize,
+        "rendered pixel buffer has an invalid length"
+    );
 
     let mut file = tempfile::tempfile().context("could not create Wayland SHM backing file")?;
     file.write_all(pixels)?;
@@ -224,7 +231,6 @@ fn create_surface_buffer(
     pool.destroy();
     Ok(buffer)
 }
-
 
 /// Render the current VT snapshot and publish a fresh immutable SHM buffer.
 fn present_surface_buffer(
@@ -270,6 +276,7 @@ struct WindowState {
     pending_size: Option<(i32, i32)>,
     current_size: (i32, i32),
     running: bool,
+    configured: bool,
     event_error: Option<String>,
 }
 
@@ -443,7 +450,13 @@ impl Dispatch<xdg_surface::XdgSurface, ()> for WindowState {
             }
 
             state.current_size = (width, height);
-            if let Err(error) = present_surface_buffer(state, size.width, size.height, queue_handle) {
+            state.configured = true;
+            if let Err(error) = present_surface_buffer(
+                state,
+                size.width,
+                size.height,
+                queue_handle,
+            ) {
                 state.event_error = Some(error.to_string());
                 state.running = false;
             }
