@@ -483,6 +483,66 @@ mod tests {
     }
 
     #[test]
+    fn reconfiguring_repeat_restarts_the_initial_delay() {
+        let start = Instant::now();
+        let reconfigured_at = start + Duration::from_millis(100);
+        let mut repeat = KeyRepeat::default();
+        repeat.configure(20, 500, start);
+        repeat.press(30, true, start);
+
+        assert_eq!(repeat.take_due(start + Duration::from_millis(499)), None);
+
+        // A compositor update while the key is held starts a fresh delay.
+        repeat.configure(10, 250, reconfigured_at);
+        assert_eq!(
+            repeat.take_due(reconfigured_at + Duration::from_millis(249)),
+            None
+        );
+        assert_eq!(
+            repeat.take_due(reconfigured_at + Duration::from_millis(250)),
+            Some(30)
+        );
+        assert_eq!(
+            repeat.take_due(reconfigured_at + Duration::from_millis(349)),
+            None
+        );
+        assert_eq!(
+            repeat.take_due(reconfigured_at + Duration::from_millis(350)),
+            Some(30)
+        );
+    }
+
+    #[test]
+    fn negative_repeat_rate_disables_and_clears_active_key() {
+        let start = Instant::now();
+        let mut repeat = KeyRepeat::default();
+        repeat.configure(20, 300, start);
+        repeat.press(30, true, start);
+
+        repeat.configure(-1, 100, start + Duration::from_millis(50));
+
+        assert_eq!(repeat.take_due(start + Duration::from_secs(1)), None);
+
+        // Re-enabling repeat must not resurrect the key cleared by disable.
+        repeat.configure(20, 300, start + Duration::from_secs(1));
+        assert_eq!(repeat.take_due(start + Duration::from_secs(2)), None);
+    }
+
+    #[test]
+    fn releasing_an_unrelated_key_preserves_active_repeat() {
+        let start = Instant::now();
+        let mut repeat = KeyRepeat::default();
+        repeat.configure(20, 300, start);
+        repeat.press(30, true, start);
+        repeat.release(31);
+
+        assert_eq!(
+            repeat.take_due(start + Duration::from_millis(300)),
+            Some(30)
+        );
+    }
+
+    #[test]
     fn starts_without_a_keymap() {
         let mut keyboard = XkbKeyboard::new().expect("XKB context should be available");
         assert!(!keyboard.is_ready());
