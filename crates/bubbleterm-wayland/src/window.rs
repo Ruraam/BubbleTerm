@@ -96,7 +96,9 @@ fn create_surface_buffer(
         "Wayland buffer dimensions exceed the safety limit"
     );
 
-    let stride = width.checked_mul(4).context("Wayland buffer stride overflow")?;
+    let stride = width
+        .checked_mul(4)
+        .context("Wayland buffer stride overflow")?;
     let byte_len = stride
         .checked_mul(height)
         .context("Wayland buffer size overflow")?;
