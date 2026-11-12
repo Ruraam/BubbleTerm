@@ -322,9 +322,12 @@ mod tests {
                 !remaining.is_zero(),
                 "Bubblewrap child did not confirm its controlling TTY"
             );
-            let chunk = rx
-                .recv_timeout(remaining)
-                .expect("Bubblewrap PTY output timed out");
+            let chunk = rx.recv_timeout(remaining).unwrap_or_else(|error| {
+                panic!(
+                    "Bubblewrap PTY output timed out ({error}); captured output: {}",
+                    String::from_utf8_lossy(&output)
+                )
+            });
             output.extend_from_slice(&chunk);
         }
 
