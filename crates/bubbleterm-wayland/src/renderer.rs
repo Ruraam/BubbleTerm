@@ -225,7 +225,11 @@ fn draw_noto_glyph(
             if background_offset + 3 >= target.pixels.len() {
                 continue;
             }
-            let bg = &target.pixels[background_offset..background_offset + 3];
+            let (background_blue, background_green, background_red) = (
+                target.pixels[background_offset],
+                target.pixels[background_offset + 1],
+                target.pixels[background_offset + 2],
+            );
             let blend = |fg: u8, bg: u8| {
                 ((u16::from(fg) * coverage + u16::from(bg) * (255 - coverage)) / 255) as u8
             };
@@ -233,9 +237,9 @@ fn draw_noto_glyph(
                 x + x_offset + dx,
                 y + y_offset + dy,
                 (
-                    blend(foreground.0, bg[2]),
-                    blend(foreground.1, bg[1]),
-                    blend(foreground.2, bg[0]),
+                    blend(foreground.0, background_red),
+                    blend(foreground.1, background_green),
+                    blend(foreground.2, background_blue),
                 ),
             );
         }
