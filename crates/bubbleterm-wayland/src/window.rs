@@ -436,19 +436,26 @@ impl Dispatch<wl_seat::WlSeat, ()> for WindowState {
 impl Dispatch<wl_keyboard::WlKeyboard, ()> for WindowState {
     fn event(
         state: &mut Self,
-        _: &wl_keyboard::WlKeyboard,
+        keyboard: &wl_keyboard::WlKeyboard,
         event: wl_keyboard::Event,
         _: &(),
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
+        // Ignore events from a proxy that is no longer the seat's active
+        // keyboard. This also rejects queued events from a removed proxy if
+        // the seat has already advertised a replacement keyboard.
+        if !state.keyboard_lifecycle.available
+            || !state
+                .keyboard
+                .as_ref()
+                .is_some_and(|active| active.id() == keyboard.id())
+        {
+            return;
+        }
+
         match event {
             wl_keyboard::Event::Keymap { format, fd, size } => {
-                // A destroyed keyboard proxy may still have queued events.
-                // Do not let those events restore a keymap after seat removal.
-                if !state.keyboard_lifecycle.available {
-                    return;
-                }
                 if supports_xkb_keymap(format) {
                     state.key_repeat.clear();
                     if let Err(error) = state.xkb.install_keymap(fd, size) {
@@ -476,9 +483,7 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WindowState {
                 }
             }
             wl_keyboard::Event::RepeatInfo { rate, delay } => {
-                if state.keyboard_lifecycle.available {
-                    state.key_repeat.configure(rate, delay, Instant::now());
-                }
+                state.key_repeat.configure(rate, delay, Instant::now());
             }
             wl_keyboard::Event::Key {
                 key,
