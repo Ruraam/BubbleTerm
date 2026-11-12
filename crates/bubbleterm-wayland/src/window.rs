@@ -380,7 +380,8 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WindowState {
                 state: WEnum::Value(wl_keyboard::KeyState::Pressed),
                 ..
             } => {
-                if let Some(bytes) = state.xkb.translate(key) {
+                let application_cursor = state.terminal.application_cursor();
+                if let Some(bytes) = state.xkb.translate(key, application_cursor) {
                     if let Some(writer) = state.pty_writer.as_mut() {
                         if let Err(error) = writer.write_all(&bytes).and_then(|_| writer.flush()) {
                             state.event_error = Some(error.to_string());
