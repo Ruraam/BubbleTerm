@@ -87,6 +87,7 @@ pub fn run_wayland_window(session: PtySession, cell_metrics: CellMetrics) -> Res
         shm,
         surface,
         keyboard: None,
+        keyboard_lifecycle: KeyboardLifecycle::default(),
         xkb: XkbKeyboard::new()?,
         key_repeat: KeyRepeat::default(),
         buffer: None,
@@ -290,6 +291,7 @@ struct WindowState {
     shm: wl_shm::WlShm,
     surface: wl_surface::WlSurface,
     keyboard: Option<wl_keyboard::WlKeyboard>,
+    keyboard_lifecycle: KeyboardLifecycle,
     xkb: XkbKeyboard,
     key_repeat: KeyRepeat,
     buffer: Option<wl_buffer::WlBuffer>,
@@ -346,6 +348,54 @@ impl Dispatch<wl_buffer::WlBuffer, ()> for WindowState {
     }
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct KeyboardLifecycle {
+    available: bool,
+    focused: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CapabilityChange {
+    Added,
+    Removed,
+    Unchanged,
+}
+
+impl KeyboardLifecycle {
+    fn update_capability(&mut self, available: bool) -> CapabilityChange {
+        if self.available == available {
+            return CapabilityChange::Unchanged;
+        }
+        self.available = available;
+        if available {
+            CapabilityChange::Added
+        } else {
+            // A removed keyboard cannot retain focus.
+            self.focused = false;
+            CapabilityChange::Removed
+        }
+    }
+
+    fn enter(&mut self) -> bool {
+        if !self.available || self.focused {
+            return false;
+        }
+        self.focused = true;
+        true
+    }
+
+    fn leave(&mut self) -> bool {
+        std::mem::replace(&mut self.focused, false)
+    }
+}
+
+fn has_keyboard_capability(capabilities: WEnum<wl_seat::Capability>) -> bool {
+    match capabilities {
+        WEnum::Value(capabilities) => capabilities.contains(wl_seat::Capability::Keyboard),
+        WEnum::Unknown(raw) => raw & 0b010 != 0,
+    }
+}
+
 impl Dispatch<wl_seat::WlSeat, ()> for WindowState {
     fn event(
         state: &mut Self,
@@ -356,16 +406,19 @@ impl Dispatch<wl_seat::WlSeat, ()> for WindowState {
         queue_handle: &QueueHandle<Self>,
     ) {
         if let wl_seat::Event::Capabilities { capabilities } = event {
-            let has_keyboard = match capabilities {
-                WEnum::Value(capabilities) => capabilities.contains(wl_seat::Capability::Keyboard),
-                WEnum::Unknown(raw) => raw & 0b010 != 0,
-            };
-            if has_keyboard && state.keyboard.is_none() {
-                state.keyboard = Some(seat.get_keyboard(queue_handle, ()));
-            } else if !has_keyboard {
-                state.keyboard = None;
-                state.xkb.clear_keymap();
-                state.key_repeat.clear();
+            match state
+                .keyboard_lifecycle
+                .update_capability(has_keyboard_capability(capabilities))
+            {
+                CapabilityChange::Added => {
+                    state.keyboard = Some(seat.get_keyboard(queue_handle, ()));
+                }
+                CapabilityChange::Removed => {
+                    state.keyboard = None;
+                    state.xkb.clear_keymap();
+                    state.key_repeat.clear();
+                }
+                CapabilityChange::Unchanged => {}
             }
         }
     }
@@ -432,12 +485,16 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WindowState {
             } => state.key_repeat.release(key),
             wl_keyboard::Event::Enter { .. } => {
                 // A fresh modifier snapshot follows focus entry. Do not carry
-                // repeat state across surfaces or focus transitions.
-                state.key_repeat.clear();
+                // repeat state across surfaces or duplicate Enter events.
+                if state.keyboard_lifecycle.enter() {
+                    state.key_repeat.clear();
+                }
             }
             wl_keyboard::Event::Leave { .. } => {
-                state.key_repeat.clear();
-                state.xkb.clear_modifiers();
+                if state.keyboard_lifecycle.leave() {
+                    state.key_repeat.clear();
+                    state.xkb.clear_modifiers();
+                }
             }
             _ => {}
         }
@@ -533,7 +590,11 @@ impl Dispatch<xdg_toplevel::XdgToplevel, ()> for WindowState {
 
 #[cfg(test)]
 mod tests {
-    use super::checked_buffer_layout;
+    use super::{
+        CapabilityChange, KeyboardLifecycle, checked_buffer_layout, has_keyboard_capability,
+    };
+    use wayland_client::WEnum;
+    use wayland_client::protocol::wl_seat;
 
     #[test]
     fn computes_checked_shm_layout() {
