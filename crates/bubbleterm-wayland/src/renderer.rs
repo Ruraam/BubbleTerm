@@ -171,7 +171,6 @@ fn draw_cell(target: &mut RenderTarget, x: u32, y: u32, metrics: CellMetrics, ce
     }
 }
 
-
 /// Resolve common terminal Unicode drawing characters without host fonts.
 /// ASCII uses the embedded font; box drawing and block elements are generated
 /// as compact 8x8 bitmaps. Other unsupported codepoints use a visible fallback.
