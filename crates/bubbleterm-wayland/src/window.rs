@@ -4,11 +4,12 @@
 //! buffers. Keyboard input is translated using the compositor-provided XKB
 //! keymap. Terminal glyph rendering and fractional scaling remain future work.
 
-use std::io::Write;
-use std::os::fd::AsFd;
+use std::{io::Write, os::fd::AsFd, sync::mpsc::TryRecvError};
 
 use anyhow::{Context, Result, bail, ensure};
-use bubbleterm_pty::PtySession;
+use bubbleterm_pty::{PtyOutputEvent, PtyOutputReader, PtySession};
+use bubbleterm_vt::{GridSize, Terminal};
+use nix::poll::{PollFd, PollFlags, poll};
 use wayland_client::{
     Connection, Dispatch, Proxy, QueueHandle, WEnum, delegate_noop,
     globals::{GlobalListContents, registry_queue_init},
@@ -58,8 +59,25 @@ pub fn run_wayland_window(session: PtySession, cell_metrics: CellMetrics) -> Res
     toplevel.set_title(WINDOW_TITLE.to_owned());
     toplevel.set_app_id("org.ruraam.BubbleTerm".to_owned());
 
+    let initial_pty_size = session
+        .size()
+        .context("could not read initial PTY dimensions")?;
+    let terminal = Terminal::new(
+        GridSize {
+            columns: initial_pty_size.cols,
+            rows: initial_pty_size.rows,
+        },
+        10_000,
+    )
+    .context("could not initialize the VT parser")?;
+    let pty_output = PtyOutputReader::spawn(&session)
+        .context("could not start the PTY output reader")?;
+
     let mut state = WindowState {
         session,
+        pty_output,
+        terminal,
+        pty_closed: false,
         pty_writer: None,
         cell_metrics,
         shm,
@@ -86,16 +104,63 @@ pub fn run_wayland_window(session: PtySession, cell_metrics: CellMetrics) -> Res
 
     while state.running {
         event_queue
-            .blocking_dispatch(&mut state)
-            .context("Wayland event dispatch failed")?;
+            .dispatch_pending(&mut state)
+            .context("Wayland pending-event dispatch failed")?;
+        drain_pty_output(&mut state);
         if let Some(error) = state.event_error.take() {
             bail!("Wayland window event failed: {error}");
         }
+
+        event_queue.flush().context("Wayland request flush failed")?;
+        let Some(read_guard) = event_queue.prepare_read() else {
+            continue;
+        };
+        let mut poll_fds = [PollFd::new(
+            read_guard.connection_fd(),
+            PollFlags::POLLIN,
+        )];
+        let poll_result = poll(&mut poll_fds, 8_u16)
+            .context("could not poll the Wayland connection")?;
+        let socket_ready = poll_result > 0
+            && poll_fds[0].revents().is_some_and(|flags| {
+                flags.intersects(PollFlags::POLLIN | PollFlags::POLLHUP | PollFlags::POLLERR)
+            });
+        drop(poll_fds);
+
+        if socket_ready {
+            read_guard
+                .read()
+                .context("could not read Wayland events")?;
+        }
+        // Dropping the guard on timeout cancels the prepared read. PTY output
+        // is drained on the next iteration without blocking the UI thread.
     }
 
     // Keep the bound seat alive for as long as its keyboard proxy may exist.
     drop(seat);
     Ok(())
+}
+
+/// Drain all currently available PTY output into the VT parser.
+///
+/// This function is called only on the Wayland thread and never waits for
+/// additional PTY data. The reader worker owns all blocking reads.
+fn drain_pty_output(state: &mut WindowState) {
+    loop {
+        match state.pty_output.try_recv() {
+            Ok(PtyOutputEvent::Data(bytes)) => state.terminal.process(&bytes),
+            Ok(PtyOutputEvent::Closed) => {
+                state.pty_closed = true;
+                break;
+            }
+            Ok(PtyOutputEvent::Error(error)) => {
+                state.event_error = Some(format!("PTY output reader failed: {error}"));
+                state.running = false;
+                break;
+            }
+            Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
+        }
+    }
 }
 
 fn checked_buffer_layout(width: u32, height: u32) -> Result<(i32, i32, i32, i32)> {
@@ -160,6 +225,9 @@ fn create_surface_buffer(
 
 struct WindowState {
     session: PtySession,
+    pty_output: PtyOutputReader,
+    terminal: Terminal,
+    pty_closed: bool,
     pty_writer: Option<Box<dyn Write + Send>>,
     cell_metrics: CellMetrics,
     shm: wl_shm::WlShm,
