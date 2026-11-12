@@ -246,4 +246,87 @@ mod tests {
         });
         assert!(result.is_err());
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn bubblewrap_session_keeps_controlling_tty_and_delivers_sigwinch() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let rootfs = std::env::var("BUBBLETERM_TEST_BWRAP_ROOTFS")
+            .expect("CI must provide a minimal static Bubblewrap test rootfs");
+        let rootfs = std::path::PathBuf::from(rootfs);
+        assert!(rootfs.join("bin/sh").exists(), "test rootfs must contain /bin/sh");
+
+        let spec = LaunchSpec {
+            shell: "/bin/sh".into(),
+            args: vec![
+                "-c".into(),
+                "test -t 0 || exit 31; trap 'echo BUBBLE_WINCH' WINCH; echo BUBBLE_READY; while :; do sleep 0.05; done".into(),
+            ],
+            working_directory: Some("/".into()),
+            environment: Default::default(),
+            kind: ShellKind::Bubble {
+                rootfs,
+                read_only: true,
+            },
+        };
+        let initial = PtySize {
+            rows: 24,
+            cols: 80,
+            pixel_width: 800,
+            pixel_height: 480,
+        };
+        let resized = PtySize {
+            rows: 40,
+            cols: 120,
+            pixel_width: 1200,
+            pixel_height: 800,
+        };
+
+        let mut session = PtySession::spawn(&spec, initial)
+            .expect("Bubblewrap shell should start with a controlling TTY");
+        let mut reader = session
+            .try_clone_reader()
+            .expect("PTY reader should be cloneable");
+        let (tx, rx) = mpsc::channel();
+
+        std::thread::spawn(move || {
+            let mut buffer = [0_u8; 256];
+            loop {
+                match reader.read(&mut buffer) {
+                    Ok(0) => break,
+                    Ok(count) => {
+                        if tx.send(buffer[..count].to_vec()).is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        let mut output = Vec::new();
+        let ready_deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !output.windows(b"BUBBLE_READY".len()).any(|window| window == b"BUBBLE_READY") {
+            let remaining = ready_deadline.saturating_duration_since(std::time::Instant::now());
+            assert!(!remaining.is_zero(), "Bubblewrap child did not confirm its controlling TTY");
+            let chunk = rx.recv_timeout(remaining).expect("Bubblewrap PTY output timed out");
+            output.extend_from_slice(&chunk);
+        }
+
+        session.resize(resized).expect("Bubblewrap PTY resize should succeed");
+
+        let winch_deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !output.windows(b"BUBBLE_WINCH".len()).any(|window| window == b"BUBBLE_WINCH") {
+            let remaining = winch_deadline.saturating_duration_since(std::time::Instant::now());
+            assert!(!remaining.is_zero(), "Bubblewrap foreground process did not receive SIGWINCH");
+            let chunk = rx.recv_timeout(remaining).expect("Bubblewrap SIGWINCH response timed out");
+            output.extend_from_slice(&chunk);
+        }
+
+        session.kill().expect("Bubblewrap test child should be terminated");
+        let _ = session.wait();
+    }
+
 }
