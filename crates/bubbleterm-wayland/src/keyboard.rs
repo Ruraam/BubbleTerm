@@ -561,14 +561,8 @@ mod tests {
         assert_eq!(repeat.take_due(start + Duration::from_secs(1)), None);
 
         repeat.press(30, true, start + Duration::from_secs(1));
-        assert_eq!(
-            repeat.take_due(start + Duration::from_secs(1)),
-            None
-        );
-        assert_eq!(
-            repeat.take_due(start + Duration::from_secs(2)),
-            Some(30)
-        );
+        assert_eq!(repeat.take_due(start + Duration::from_secs(1)), None);
+        assert_eq!(repeat.take_due(start + Duration::from_secs(2)), Some(30));
     }
 
     #[test]
