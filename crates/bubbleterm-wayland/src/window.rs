@@ -64,7 +64,6 @@ pub fn run_wayland_window(session: PtySession, cell_metrics: CellMetrics) -> Res
         cell_metrics,
         shm,
         surface,
-        seat,
         keyboard: None,
         xkb: XkbKeyboard::new()?,
         buffer: None,
@@ -94,6 +93,8 @@ pub fn run_wayland_window(session: PtySession, cell_metrics: CellMetrics) -> Res
         }
     }
 
+    // Keep the bound seat alive for as long as its keyboard proxy may exist.
+    drop(seat);
     Ok(())
 }
 
@@ -163,7 +164,6 @@ struct WindowState {
     cell_metrics: CellMetrics,
     shm: wl_shm::WlShm,
     surface: wl_surface::WlSurface,
-    seat: wl_seat::WlSeat,
     keyboard: Option<wl_keyboard::WlKeyboard>,
     xkb: XkbKeyboard,
     buffer: Option<wl_buffer::WlBuffer>,
@@ -272,9 +272,9 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WindowState {
                 .update_modifiers(mods_depressed, mods_latched, mods_locked, group),
             wl_keyboard::Event::Key {
                 key,
-                state: key_state,
+                state: WEnum::Value(wl_keyboard::KeyState::Pressed),
                 ..
-            } if key_state == WEnum::Value(wl_keyboard::KeyState::Pressed) => {
+            } => {
                 if let Some(bytes) = state.xkb.translate(key) {
                     if let Some(writer) = state.pty_writer.as_mut() {
                         if let Err(error) = writer.write_all(&bytes).and_then(|_| writer.flush()) {
