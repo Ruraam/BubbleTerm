@@ -309,6 +309,12 @@ mod tests {
             rows: 65_535,
         });
         assert_eq!(result, Err(TerminalError::GridTooLarge));
-        assert_eq!(terminal.size(), GridSize { columns: 8, rows: 2 });
+        assert_eq!(
+            terminal.size(),
+            GridSize {
+                columns: 8,
+                rows: 2
+            }
+        );
     }
 }
