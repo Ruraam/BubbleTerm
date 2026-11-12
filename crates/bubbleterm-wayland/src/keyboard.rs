@@ -275,6 +275,27 @@ mod tests {
     }
 
     #[test]
+    fn latest_repeatable_key_owns_repeat_until_released() {
+        let start = Instant::now();
+        let mut repeat = KeyRepeat::default();
+        repeat.configure(20, 300, start);
+        repeat.press(30, true, start);
+        repeat.press(31, true, start + Duration::from_millis(100));
+
+        // Releasing the older key must not cancel the newer key's repeat.
+        repeat.release(30);
+        assert_eq!(
+            repeat.take_due(start + Duration::from_millis(400)),
+            Some(31)
+        );
+
+        // Releasing the active key stops repeat; an older held key is not
+        // resurrected because only the most recently pressed key repeats.
+        repeat.release(31);
+        assert_eq!(repeat.take_due(start + Duration::from_secs(1)), None);
+    }
+
+    #[test]
     fn modifier_press_does_not_cancel_an_active_repeat() {
         let start = Instant::now();
         let mut repeat = KeyRepeat::default();
