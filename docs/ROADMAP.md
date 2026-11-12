@@ -6,7 +6,7 @@
 - [x] Document Wayland-only scope and security principles.
 - [ ] Add CI quality gates and dependency policy.
 - [ ] Validate the dependency stack and MSRV on CI.
-- [ ] Add a minimal native Wayland window.
+- [x] Add a minimal native Wayland xdg-toplevel window bootstrap (placeholder SHM surface).
 
 ## 0.2 — Terminal core
 
@@ -14,7 +14,7 @@
 - [x] Add PTY lifecycle management and bounded I/O.
 - [x] Implement PTY winsize updates and kernel SIGWINCH regression tests.
 - [x] Add Wayland surface-to-PTY resize conversion and validation.
-- [ ] Wire the adapter into a live Wayland configure/commit event loop.
+- [x] Wire the PTY resize adapter into the native Wayland configure/commit event loop.
 - [ ] Add VT and PTY regression fixtures.
 
 ## 0.3 — Rendering
