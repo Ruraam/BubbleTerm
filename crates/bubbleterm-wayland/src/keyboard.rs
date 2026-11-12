@@ -23,7 +23,7 @@ pub struct XkbKeyboard {
     context: XkbContext,
     keymap: Option<Keymap>,
     state: Option<State>,
-    compose_table: Option<xkb::compose::Table>,
+    _compose_table: Option<xkb::compose::Table>,
     compose_state: Option<xkb::compose::State>,
 }
 
@@ -50,7 +50,7 @@ impl XkbKeyboard {
             context,
             keymap: None,
             state: None,
-            compose_table,
+            _compose_table: compose_table,
             compose_state,
         })
     }
@@ -178,7 +178,9 @@ impl XkbKeyboard {
     /// completed sequence emits its composed UTF-8 string. If no Compose
     /// sequence matches, ordinary XKB text is returned unchanged.
     fn translate_text(&mut self, keysym: xkb::Keysym, fallback: String) -> Option<Vec<u8>> {
-        let compose = self.compose_state.as_mut()?;
+        let Some(compose) = self.compose_state.as_mut() else {
+            return (!fallback.is_empty()).then(|| fallback.into_bytes());
+        };
         compose.feed(keysym);
         match compose.status() {
             xkb::compose::Status::Composing => None,
