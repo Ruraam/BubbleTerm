@@ -24,11 +24,15 @@ jobs:
           sudo apt-get install --no-install-recommends -y \
             pkg-config \
             libwayland-dev \
-            libxkbcommon-dev
+            libxkbcommon-dev \
+            bubblewrap \
+            busybox-static
       - name: Verify native dependencies
         run: |
           pkg-config --modversion wayland-client
           pkg-config --modversion xkbcommon
+          bwrap --version
+          busybox --help >/dev/null
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -37,5 +41,13 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Prepare minimal Bubblewrap test rootfs
+        run: |
+          rootfs="$RUNNER_TEMP/bubbleterm-rootfs"
+          mkdir -p "$rootfs/bin"
+          install -m 0755 "$(command -v busybox)" "$rootfs/bin/busybox"
+          "$rootfs/bin/busybox" --install -s "$rootfs/bin"
+          test -x "$rootfs/bin/sh"
+          echo "BUBBLETERM_TEST_BWRAP_ROOTFS=$rootfs" >> "$GITHUB_ENV"
       - name: Tests
         run: cargo test --workspace
