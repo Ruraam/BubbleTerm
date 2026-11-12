@@ -368,7 +368,7 @@ mod tests {
 
     #[test]
     fn starts_without_a_keymap() {
-        let keyboard = XkbKeyboard::new().expect("XKB context should be available");
+        let mut keyboard = XkbKeyboard::new().expect("XKB context should be available");
         assert!(!keyboard.is_ready());
         assert_eq!(keyboard.translate(30, false), None);
     }
