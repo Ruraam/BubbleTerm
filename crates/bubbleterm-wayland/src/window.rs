@@ -619,9 +619,18 @@ mod tests {
     fn keyboard_capability_transitions_are_idempotent() {
         let mut lifecycle = KeyboardLifecycle::default();
         assert_eq!(lifecycle.update_capability(true), CapabilityChange::Added);
-        assert_eq!(lifecycle.update_capability(true), CapabilityChange::Unchanged);
-        assert_eq!(lifecycle.update_capability(false), CapabilityChange::Removed);
-        assert_eq!(lifecycle.update_capability(false), CapabilityChange::Unchanged);
+        assert_eq!(
+            lifecycle.update_capability(true),
+            CapabilityChange::Unchanged
+        );
+        assert_eq!(
+            lifecycle.update_capability(false),
+            CapabilityChange::Removed
+        );
+        assert_eq!(
+            lifecycle.update_capability(false),
+            CapabilityChange::Unchanged
+        );
     }
 
     #[test]
@@ -640,15 +649,22 @@ mod tests {
         let mut lifecycle = KeyboardLifecycle::default();
         lifecycle.update_capability(true);
         assert!(lifecycle.enter());
-        assert_eq!(lifecycle.update_capability(false), CapabilityChange::Removed);
+        assert_eq!(
+            lifecycle.update_capability(false),
+            CapabilityChange::Removed
+        );
         assert!(!lifecycle.leave());
         assert!(!lifecycle.enter());
     }
 
     #[test]
     fn detects_keyboard_capability_in_known_and_unknown_masks() {
-        assert!(has_keyboard_capability(WEnum::Value(wl_seat::Capability::Keyboard)));
-        assert!(!has_keyboard_capability(WEnum::Value(wl_seat::Capability::Pointer)));
+        assert!(has_keyboard_capability(WEnum::Value(
+            wl_seat::Capability::Keyboard
+        )));
+        assert!(!has_keyboard_capability(WEnum::Value(
+            wl_seat::Capability::Pointer
+        )));
         assert!(has_keyboard_capability(WEnum::Unknown(0b010)));
         assert!(!has_keyboard_capability(WEnum::Unknown(0b001)));
     }
