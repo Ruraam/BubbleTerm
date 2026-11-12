@@ -1,6 +1,7 @@
 //! Native Wayland client boundary. X11 is intentionally unsupported.
 #![forbid(unsafe_code)]
 
+pub mod keyboard;
 pub mod resize;
 pub mod window;
 
