@@ -83,15 +83,15 @@ impl LaunchSpec {
                     OsString::from("--unshare-ipc"),
                     OsString::from("--unshare-uts"),
                     OsString::from("--unshare-net"),
+                    OsString::from(if *read_only { "--ro-bind" } else { "--bind" }),
+                    rootfs.as_os_str().to_owned(),
+                    OsString::from("/"),
                     OsString::from("--proc"),
                     OsString::from("/proc"),
                     OsString::from("--dev"),
                     OsString::from("/dev"),
                     OsString::from("--tmpfs"),
                     OsString::from("/tmp"),
-                    OsString::from(if *read_only { "--ro-bind" } else { "--bind" }),
-                    rootfs.as_os_str().to_owned(),
-                    OsString::from("/"),
                 ];
 
                 if let Some(directory) = &self.working_directory {
