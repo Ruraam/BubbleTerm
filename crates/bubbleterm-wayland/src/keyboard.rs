@@ -87,28 +87,28 @@ impl XkbKeyboard {
                 } else {
                     b"\x1b[A"
                 }
-            },
+            }
             xkb::Keysym::Down => {
                 if application_cursor {
                     b"\x1bOB"
                 } else {
                     b"\x1b[B"
                 }
-            },
+            }
             xkb::Keysym::Right => {
                 if application_cursor {
                     b"\x1bOC"
                 } else {
                     b"\x1b[C"
                 }
-            },
+            }
             xkb::Keysym::Left => {
                 if application_cursor {
                     b"\x1bOD"
                 } else {
                     b"\x1b[D"
                 }
-            },
+            }
             xkb::Keysym::Home => b"\x1b[H",
             xkb::Keysym::End => b"\x1b[F",
             xkb::Keysym::Insert => b"\x1b[2~",
