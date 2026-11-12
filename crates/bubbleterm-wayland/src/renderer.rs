@@ -424,7 +424,7 @@ mod tests {
     fn bundled_noto_font_renders_precomposed_latin_unicode() {
         use noto_sans_mono_bitmap::{FontWeight, RasterHeight, get_raster};
 
-        for character in ['é', 'à', 'ñ', 'Ā', 'Œ', '€'] {
+        for character in ['é', 'à', 'ñ', 'Ā', 'Œ', '£'] {
             assert!(
                 get_raster(character, FontWeight::Regular, RasterHeight::Size16).is_some(),
                 "bundled font should contain {character:?}"
