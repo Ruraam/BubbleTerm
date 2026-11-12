@@ -135,6 +135,17 @@ impl XkbKeyboard {
         Some(sequence.to_vec())
     }
 
+    /// Clears compositor modifier state when keyboard focus is lost.
+    ///
+    /// The compositor will send a fresh modifier snapshot after focus is
+    /// entered again. Clearing here prevents a stale Shift/Ctrl/Alt/Super
+    /// state from affecting input while the keyboard is unfocused.
+    pub fn clear_modifiers(&mut self) {
+        if let Some(state) = &mut self.state {
+            state.update_mask(0, 0, 0, 0, 0, 0);
+        }
+    }
+
     /// Clears the active keymap when the seat loses keyboard capability.
     pub fn clear_keymap(&mut self) {
         self.state = None;
