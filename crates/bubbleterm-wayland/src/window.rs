@@ -1,17 +1,16 @@
 //! Native Wayland window lifecycle and PTY resize integration.
 //!
-//! This module creates an xdg-toplevel surface, acknowledges compositor
-//! configure events, and propagates the committed logical surface size to the
-//! active PTY. Rendering is currently a neutral SHM placeholder; terminal
-//! cell rendering and fractional-scale support are separate follow-up work.
+//! The current surface uses a dynamically-sized shared-memory placeholder.
+//! Terminal glyph rendering, input, and fractional scaling are layered on top
+//! of this window lifecycle in subsequent steps.
 
 use std::io::Write;
 use std::os::fd::AsFd;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use bubbleterm_pty::PtySession;
 use wayland_client::{
-    Connection, Dispatch, QueueHandle, delegate_noop,
+    Connection, Dispatch, Proxy, QueueHandle, delegate_noop,
     globals::{GlobalListContents, registry_queue_init},
     protocol::{wl_buffer, wl_compositor, wl_registry, wl_shm, wl_shm_pool, wl_surface},
 };
@@ -21,13 +20,15 @@ use crate::{CellMetrics, SurfaceSize, resize_pty_for_surface};
 
 const INITIAL_WIDTH: u32 = 800;
 const INITIAL_HEIGHT: u32 = 600;
+const MAX_BUFFER_BYTES: u32 = 64 * 1024 * 1024;
+const MAX_BUFFER_DIMENSION: u32 = 8192;
 const WINDOW_TITLE: &str = "BubbleTerm";
+const BACKGROUND_PIXEL: [u8; 4] = [0x18, 0x18, 0x20, 0xff];
 
 /// Runs one native Wayland window until the compositor requests it to close.
 ///
-/// The caller retains ownership of the PTY session. Configure sizes are
-/// interpreted as logical pixels at scale factor 1 until output/fractional
-/// scaling is implemented.
+/// Configure dimensions are logical pixels at scale factor 1 for now. The
+/// caller transfers ownership of the PTY session to the window event loop.
 pub fn run_wayland_window(session: PtySession, cell_metrics: CellMetrics) -> Result<()> {
     let connection = Connection::connect_to_env()
         .context("could not connect to the Wayland compositor (check WAYLAND_DISPLAY)")?;
@@ -51,12 +52,14 @@ pub fn run_wayland_window(session: PtySession, cell_metrics: CellMetrics) -> Res
     toplevel.set_title(WINDOW_TITLE.to_owned());
     toplevel.set_app_id("org.ruraam.BubbleTerm".to_owned());
 
-    let buffer = create_placeholder_buffer(&shm, &queue_handle)?;
     let mut state = WindowState {
         session,
         cell_metrics,
+        shm,
         surface,
-        buffer,
+        buffer: None,
+        buffer_released: false,
+        retired_buffers: Vec::new(),
         pending_size: None,
         current_size: (INITIAL_WIDTH as i32, INITIAL_HEIGHT as i32),
         configured: false,
@@ -64,8 +67,7 @@ pub fn run_wayland_window(session: PtySession, cell_metrics: CellMetrics) -> Res
         resize_error: None,
     };
 
-    // The first commit has no buffer. xdg-shell requires the compositor to
-    // answer with a configure before the client maps its content.
+    // xdg-shell requires an initial empty commit before the first configure.
     state.surface.commit();
 
     while state.running {
@@ -80,31 +82,54 @@ pub fn run_wayland_window(session: PtySession, cell_metrics: CellMetrics) -> Res
     Ok(())
 }
 
-fn create_placeholder_buffer(
+fn create_surface_buffer(
     shm: &wl_shm::WlShm,
+    width: u32,
+    height: u32,
     queue_handle: &QueueHandle<WindowState>,
 ) -> Result<wl_buffer::WlBuffer> {
-    let byte_len = INITIAL_WIDTH
-        .checked_mul(INITIAL_HEIGHT)
-        .and_then(|pixels| pixels.checked_mul(4))
-        .context("initial Wayland buffer dimensions overflow")?;
+    ensure!(
+        width > 0 && height > 0,
+        "Wayland buffer dimensions must be non-zero"
+    );
+    ensure!(
+        width <= MAX_BUFFER_DIMENSION && height <= MAX_BUFFER_DIMENSION,
+        "Wayland buffer dimensions exceed the safety limit"
+    );
+
+    let stride = width.checked_mul(4).context("Wayland buffer stride overflow")?;
+    let byte_len = stride
+        .checked_mul(height)
+        .context("Wayland buffer size overflow")?;
+    ensure!(
+        byte_len <= MAX_BUFFER_BYTES,
+        "Wayland buffer exceeds the 64 MiB safety limit"
+    );
+
+    let width_i32 = i32::try_from(width).context("Wayland buffer width exceeds i32")?;
+    let height_i32 = i32::try_from(height).context("Wayland buffer height exceeds i32")?;
+    let stride_i32 = i32::try_from(stride).context("Wayland buffer stride exceeds i32")?;
+    let pool_size = i32::try_from(byte_len).context("Wayland SHM pool exceeds i32")?;
+
     let mut file = tempfile::tempfile().context("could not create Wayland SHM backing file")?;
-    let pixel = [0x18_u8, 0x18, 0x20, 0xff];
-    let mut row = Vec::with_capacity(INITIAL_WIDTH as usize * 4);
-    for _ in 0..INITIAL_WIDTH {
-        row.extend_from_slice(&pixel);
+    let mut pixels = vec![0x18; byte_len as usize];
+    for alpha in pixels.iter_mut().skip(3).step_by(4) {
+        *alpha = 0xff;
     }
-    for _ in 0..INITIAL_HEIGHT {
-        file.write_all(&row)?;
+    // Keep a slightly blue-tinted neutral background without depending on a
+    // renderer or GPU being available.
+    for pixel in pixels.chunks_exact_mut(4) {
+        pixel.copy_from_slice(&BACKGROUND_PIXEL);
     }
+    file.write_all(&pixels)?;
     file.flush()?;
 
-    let pool = shm.create_pool(file.as_fd(), byte_len as i32, queue_handle, ());
+    let pool = shm.create_pool(file.as_fd(), pool_size, queue_handle, ());
     let buffer = pool.create_buffer(
         0,
-        INITIAL_WIDTH as i32,
-        INITIAL_HEIGHT as i32,
-        (INITIAL_WIDTH * 4) as i32,
+        width_i32,
+        height_i32,
+        stride_i32,
         wl_shm::Format::Argb8888,
         queue_handle,
         (),
@@ -116,8 +141,11 @@ fn create_placeholder_buffer(
 struct WindowState {
     session: PtySession,
     cell_metrics: CellMetrics,
+    shm: wl_shm::WlShm,
     surface: wl_surface::WlSurface,
-    buffer: wl_buffer::WlBuffer,
+    buffer: Option<wl_buffer::WlBuffer>,
+    buffer_released: bool,
+    retired_buffers: Vec<wl_buffer::WlBuffer>,
     pending_size: Option<(i32, i32)>,
     current_size: (i32, i32),
     configured: bool,
@@ -140,8 +168,34 @@ impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for WindowState {
 delegate_noop!(WindowState: ignore wl_compositor::WlCompositor);
 delegate_noop!(WindowState: ignore wl_shm::WlShm);
 delegate_noop!(WindowState: ignore wl_shm_pool::WlShmPool);
-delegate_noop!(WindowState: ignore wl_buffer::WlBuffer);
 delegate_noop!(WindowState: ignore wl_surface::WlSurface);
+
+impl Dispatch<wl_buffer::WlBuffer, ()> for WindowState {
+    fn event(
+        state: &mut Self,
+        buffer: &wl_buffer::WlBuffer,
+        event: wl_buffer::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let wl_buffer::Event::Release = event {
+            if state
+                .buffer
+                .as_ref()
+                .is_some_and(|active| active.id() == buffer.id())
+            {
+                state.buffer_released = true;
+            } else if let Some(index) = state
+                .retired_buffers
+                .iter()
+                .position(|retired| retired.id() == buffer.id())
+            {
+                state.retired_buffers.remove(index).destroy();
+            }
+        }
+    }
+}
 
 impl Dispatch<xdg_wm_base::XdgWmBase, ()> for WindowState {
     fn event(
@@ -164,30 +218,53 @@ impl Dispatch<xdg_surface::XdgSurface, ()> for WindowState {
         xdg_surface: &xdg_surface::XdgSurface,
         event: xdg_surface::Event,
         _: &(),
-        _: &Connection,
-        _: &QueueHandle<Self>,
+        queue_handle: &QueueHandle<Self>,
     ) {
         if let xdg_surface::Event::Configure { serial } = event {
             xdg_surface.ack_configure(serial);
             let (width, height) = state.pending_size.take().unwrap_or(state.current_size);
+            if width <= 0 || height <= 0 {
+                state.surface.commit();
+                return;
+            }
+
+            let size = SurfaceSize {
+                width: width as u32,
+                height: height as u32,
+            };
+            if let Err(error) = resize_pty_for_surface(&state.session, size, state.cell_metrics) {
+                state.resize_error = Some(error.to_string());
+                state.running = false;
+                return;
+            }
+
+            let dimensions_changed = state.current_size != (width, height);
             state.current_size = (width, height);
-            if width > 0 && height > 0 {
-                let size = SurfaceSize {
-                    width: width as u32,
-                    height: height as u32,
-                };
-                if let Err(error) = resize_pty_for_surface(&state.session, size, state.cell_metrics)
-                {
-                    state.resize_error = Some(error.to_string());
-                    state.running = false;
-                    return;
+            if dimensions_changed || state.buffer.is_none() {
+                match create_surface_buffer(&state.shm, size.width, size.height, queue_handle) {
+                    Ok(new_buffer) => {
+                        if let Some(old_buffer) = state.buffer.replace(new_buffer) {
+                            if state.buffer_released {
+                                old_buffer.destroy();
+                            } else {
+                                state.retired_buffers.push(old_buffer);
+                            }
+                        }
+                        state.buffer_released = false;
+                    }
+                    Err(error) => {
+                        state.resize_error = Some(error.to_string());
+                        state.running = false;
+                        return;
+                    }
                 }
             }
-            if !state.configured {
-                state.surface.attach(Some(&state.buffer), 0, 0);
-                state.surface.damage(0, 0, i32::MAX, i32::MAX);
-                state.configured = true;
+
+            if let Some(buffer) = &state.buffer {
+                state.surface.attach(Some(buffer), 0, 0);
+                state.surface.damage(0, 0, width, height);
             }
+            state.configured = true;
             state.surface.commit();
         }
     }
