@@ -136,6 +136,82 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn controlling_tty_receives_sigwinch_after_resize() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let spec = LaunchSpec {
+            shell: "/bin/sh".into(),
+            args: vec![
+                "-c".into(),
+                "test -t 0 || exit 31; trap 'printf \\\"WINCH\\\\n\\\"' WINCH; printf 'READY\\n'; while :; do sleep 0.05; done".into(),
+            ],
+            working_directory: None,
+            environment: Default::default(),
+            kind: ShellKind::Host,
+        };
+        let initial = PtySize {
+            rows: 24,
+            cols: 80,
+            pixel_width: 800,
+            pixel_height: 480,
+        };
+        let resized = PtySize {
+            rows: 40,
+            cols: 120,
+            pixel_width: 1200,
+            pixel_height: 800,
+        };
+
+        let mut session = PtySession::spawn(&spec, initial)
+            .expect("interactive child should receive a controlling TTY");
+        let mut reader = session
+            .try_clone_reader()
+            .expect("PTY reader should be cloneable");
+        let (tx, rx) = mpsc::channel();
+
+        std::thread::spawn(move || {
+            let mut buffer = [0_u8; 256];
+            loop {
+                match reader.read(&mut buffer) {
+                    Ok(0) => break,
+                    Ok(count) => {
+                        if tx.send(buffer[..count].to_vec()).is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        let mut output = Vec::new();
+        let ready_deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while !output.windows(5).any(|window| window == b"READY") {
+            let remaining = ready_deadline.saturating_duration_since(std::time::Instant::now());
+            assert!(!remaining.is_zero(), "child did not confirm its controlling TTY");
+            let chunk = rx.recv_timeout(remaining).expect("PTY output timed out");
+            output.extend_from_slice(&chunk);
+        }
+
+        session
+            .resize(resized)
+            .expect("kernel PTY resize should succeed");
+
+        let winch_deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while !output.windows(5).any(|window| window == b"WINCH") {
+            let remaining = winch_deadline.saturating_duration_since(std::time::Instant::now());
+            assert!(!remaining.is_zero(), "foreground process group did not receive SIGWINCH");
+            let chunk = rx.recv_timeout(remaining).expect("SIGWINCH response timed out");
+            output.extend_from_slice(&chunk);
+        }
+
+        session.kill().expect("test child should be terminated");
+        let _ = session.wait();
+    }
+
     #[test]
     fn resize_rejects_zero_cell_dimensions() {
         let spec = LaunchSpec {
