@@ -5,6 +5,7 @@
 //! it never assumes a US layout or updates modifier state from raw key events.
 
 use std::{
+    ffi::{OsStr, OsString},
     fs::File,
     io::Read,
     os::fd::OwnedFd,
@@ -22,16 +23,35 @@ pub struct XkbKeyboard {
     context: XkbContext,
     keymap: Option<Keymap>,
     state: Option<State>,
+    compose_table: Option<xkb::compose::Table>,
+    compose_state: Option<xkb::compose::State>,
 }
 
 impl XkbKeyboard {
     /// Creates an XKB context. A keymap is installed after wl_keyboard sends it.
     pub fn new() -> Result<Self> {
         let context = XkbContext::new(xkb::CONTEXT_NO_FLAGS);
+        let locale = std::env::var_os("LC_ALL")
+            .filter(|value| !value.is_empty())
+            .or_else(|| std::env::var_os("LC_CTYPE").filter(|value| !value.is_empty()))
+            .or_else(|| std::env::var_os("LANG").filter(|value| !value.is_empty()))
+            .unwrap_or_else(|| OsString::from("C"));
+        let compose_table = xkb::compose::Table::new_from_locale(
+            &context,
+            OsStr::new(&locale),
+            xkb::compose::COMPILE_NO_FLAGS,
+        )
+        .ok();
+        let compose_state = compose_table
+            .as_ref()
+            .map(|table| xkb::compose::State::new(table, xkb::compose::STATE_NO_FLAGS));
+
         Ok(Self {
             context,
             keymap: None,
             state: None,
+            compose_table,
+            compose_state,
         })
     }
 
@@ -65,6 +85,7 @@ impl XkbKeyboard {
         )
         .context("could not compile the compositor-provided XKB keymap")?;
 
+        self.reset_compose();
         self.state = Some(State::new(&keymap));
         self.keymap = Some(keymap);
         Ok(())
@@ -79,7 +100,7 @@ impl XkbKeyboard {
 
     /// Converts an evdev keycode (as sent by wl_keyboard) to terminal bytes.
     /// Returns None until a valid keymap is installed or for non-text keys.
-    pub fn translate(&self, evdev_keycode: u32, application_cursor: bool) -> Option<Vec<u8>> {
+    pub fn translate(&mut self, evdev_keycode: u32, application_cursor: bool) -> Option<Vec<u8>> {
         let keycode = xkb::Keycode::new(evdev_keycode.checked_add(XKB_EVDEV_OFFSET)?);
         let state = self.state.as_ref()?;
         let keysym = state.key_get_one_sym(keycode);
@@ -125,10 +146,7 @@ impl XkbKeyboard {
             xkb::Keysym::Page_Down => b"\x1b[6~",
             _ => {
                 let text = state.key_get_utf8(keycode);
-                if text.is_empty() {
-                    return None;
-                }
-                return Some(text.into_bytes());
+                return self.translate_text(keysym, text);
             }
         };
 
@@ -141,6 +159,7 @@ impl XkbKeyboard {
     /// entered again. Clearing here prevents a stale Shift/Ctrl/Alt/Super
     /// state from affecting input while the keyboard is unfocused.
     pub fn clear_modifiers(&mut self) {
+        self.reset_compose();
         if let Some(state) = &mut self.state {
             state.update_mask(0, 0, 0, 0, 0, 0);
         }
@@ -148,8 +167,41 @@ impl XkbKeyboard {
 
     /// Clears the active keymap when the seat loses keyboard capability.
     pub fn clear_keymap(&mut self) {
+        self.reset_compose();
         self.state = None;
         self.keymap = None;
+    }
+
+    /// Translates printable keysyms through the locale Compose state machine.
+    ///
+    /// Dead keys and Multi_key sequences are withheld while composing. A
+    /// completed sequence emits its composed UTF-8 string. If no Compose
+    /// sequence matches, ordinary XKB text is returned unchanged.
+    fn translate_text(&mut self, keysym: xkb::Keysym, fallback: String) -> Option<Vec<u8>> {
+        let compose = self.compose_state.as_mut()?;
+        compose.feed(keysym);
+        match compose.status() {
+            xkb::compose::Status::Composing => None,
+            xkb::compose::Status::Composed => {
+                let output = compose.utf8().map(String::into_bytes);
+                compose.reset();
+                output
+            }
+            xkb::compose::Status::Cancelled => {
+                compose.reset();
+                (!fallback.is_empty()).then(|| fallback.into_bytes())
+            }
+            xkb::compose::Status::Nothing => {
+                (!fallback.is_empty()).then(|| fallback.into_bytes())
+            }
+        }
+    }
+
+    /// Discards any partial dead-key or Compose sequence.
+    fn reset_compose(&mut self) {
+        if let Some(compose) = &mut self.compose_state {
+            compose.reset();
+        }
     }
 
     /// Whether the active XKB keymap marks this evdev key as repeatable.
