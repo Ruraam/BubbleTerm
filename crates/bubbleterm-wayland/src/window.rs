@@ -4,12 +4,7 @@
 //! snapshots. Keyboard input is translated using the compositor-provided XKB
 //! keymap. Fractional scaling and a full Unicode font remain future work.
 
-use std::{
-    io::Write,
-    os::fd::AsFd,
-    sync::mpsc::TryRecvError,
-    time::Instant,
-};
+use std::{io::Write, os::fd::AsFd, sync::mpsc::TryRecvError, time::Instant};
 
 use anyhow::{Context, Result, bail, ensure};
 use bubbleterm_pty::{PtyOutputEvent, PtyOutputReader, PtySession};
