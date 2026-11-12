@@ -149,7 +149,15 @@ fn draw_cell(target: &mut RenderTarget, x: u32, y: u32, metrics: CellMetrics, ce
 
     // Keep antialiased Noto rendering for Latin, then use embedded GNU
     // Unifont as a broad Unicode fallback, including CJK.
-    let character = cell.text.nfc().next().unwrap_or(' ');
+    let normalized: String = cell.text.nfc().collect();
+    let mut characters = normalized.chars();
+    let first = characters.next().unwrap_or(' ');
+    let character = if is_combining_diacritic(first) { '◌' } else { first };
+    let mut combining_marks = Vec::new();
+    if is_combining_diacritic(first) {
+        combining_marks.push(first);
+    }
+    combining_marks.extend(characters.filter(|mark| is_combining_diacritic(*mark)));
     if !character.is_ascii() && !is_custom_unicode_glyph(character) {
         let rendered = draw_noto_glyph(target, x, y, metrics, character, foreground, cell.bold)
             || draw_unifont_glyph(target, x, y, metrics, character, foreground, cell.wide);
@@ -158,6 +166,7 @@ fn draw_cell(target: &mut RenderTarget, x: u32, y: u32, metrics: CellMetrics, ce
                 let underline_y = y + metrics.height - 2;
                 target.fill_rect(x, underline_y, cell_width, 1, foreground);
             }
+            draw_combining_marks(target, x, y, metrics, &combining_marks, foreground);
             return;
         }
     }
@@ -194,6 +203,7 @@ fn draw_cell(target: &mut RenderTarget, x: u32, y: u32, metrics: CellMetrics, ce
         let underline_y = y + metrics.height - 2;
         target.fill_rect(x, underline_y, metrics.width, 1, foreground);
     }
+    draw_combining_marks(target, x, y, metrics, &combining_marks, foreground);
 }
 
 /// Select the closest bundled raster height without upscaling a smaller glyph.
@@ -278,6 +288,53 @@ fn draw_noto_glyph(
         }
     }
     true
+}
+
+/// Unicode combining diacritics are overlaid on the base glyph. NFC composition
+/// handles the common precomposed cases first; these compact marks cover
+/// sequences that cannot be represented by one precomposed codepoint.
+fn is_combining_diacritic(character: char) -> bool {
+    matches!(character as u32, 0x0300..=0x036F | 0x1AB0..=0x1AFF | 0x1DC0..=0x1DFF | 0x20D0..=0x20FF | 0xFE20..=0xFE2F)
+}
+
+fn draw_combining_marks(
+    target: &mut RenderTarget,
+    x: u32,
+    y: u32,
+    metrics: CellMetrics,
+    marks: &[char],
+    foreground: (u8, u8, u8),
+) {
+    for &mark in marks {
+        let (points, below): (&[(u8, u8)], bool) = match mark {
+            '\u{0300}' => (&[(3, 0), (2, 1), (1, 2)], false),
+            '\u{0301}' => (&[(1, 0), (2, 1), (3, 2)], false),
+            '\u{0302}' => (&[(1, 2), (2, 1), (3, 2)], false),
+            '\u{0303}' => (&[(0, 1), (1, 0), (2, 1), (3, 0), (4, 1)], false),
+            '\u{0304}' => (&[(0, 1), (1, 1), (2, 1), (3, 1), (4, 1)], false),
+            '\u{0306}' => (&[(1, 0), (2, 1), (3, 0)], false),
+            '\u{0307}' => (&[(2, 1)], false),
+            '\u{0308}' => (&[(1, 1), (3, 1)], false),
+            '\u{030A}' => (&[(1, 1), (2, 0), (3, 1)], false),
+            '\u{030B}' => (&[(1, 0), (2, 1), (3, 0), (4, 1)], false),
+            '\u{0323}' => (&[(2, 1)], true),
+            '\u{0327}' => (&[(2, 0), (3, 1), (2, 2)], true),
+            '\u{0328}' => (&[(3, 0), (3, 1), (2, 2)], true),
+            _ => continue,
+        };
+        for &(mark_x, mark_y) in points {
+            if metrics.width == 0 || metrics.height < 3 {
+                continue;
+            }
+            let px = x + (u32::from(mark_x + 1) * metrics.width / 6).min(metrics.width - 1);
+            let py = if below {
+                y + metrics.height - 3 + u32::from(mark_y).min(2)
+            } else {
+                y + u32::from(mark_y).min(2)
+            };
+            target.set_pixel(px, py, foreground);
+        }
+    }
 }
 
 /// Render an embedded GNU Unifont glyph. Unicode pages are decompressed lazily
@@ -524,6 +581,17 @@ mod tests {
                 .any(|pixel| pixel[0..3] != [32, 24, 24]),
             "accented glyph should paint visible pixels"
         );
+    }
+
+    #[test]
+    fn renders_multiple_uncomposable_combining_diacritics() {
+        let mut decorated = Terminal::new(GridSize::new(1, 1).unwrap(), 0).unwrap();
+        decorated.process("x\\u{0301}\\u{0323}".as_bytes());
+        let mut plain = Terminal::new(GridSize::new(1, 1).unwrap(), 0).unwrap();
+        plain.process(b"x");
+        let decorated_image = render_snapshot(&decorated.snapshot(), 8, 8, metrics()).unwrap();
+        let plain_image = render_snapshot(&plain.snapshot(), 8, 8, metrics()).unwrap();
+        assert_ne!(decorated_image, plain_image);
     }
 
     #[test]
