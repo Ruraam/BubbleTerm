@@ -55,12 +55,12 @@ impl PtySession {
 
     /// Clone a reader for the PTY output stream.
     pub fn try_clone_reader(&self) -> Result<Box<dyn Read + Send>> {
-        self.master.try_clone_reader().map_err(Into::into)
+        self.master.try_clone_reader()
     }
 
     /// Take the single writer for sending keyboard input to the PTY.
     pub fn take_writer(&self) -> Result<Box<dyn Write + Send>> {
-        self.master.take_writer().map_err(Into::into)
+        self.master.take_writer()
     }
 
     /// Update the kernel PTY winsize. The kernel sends SIGWINCH to the
@@ -76,7 +76,7 @@ impl PtySession {
 
     /// Return the winsize currently stored by the kernel.
     pub fn size(&self) -> Result<PtySize> {
-        self.master.get_size().map_err(Into::into)
+        self.master.get_size()
     }
 
     /// Poll the child without blocking.
