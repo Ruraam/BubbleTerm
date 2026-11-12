@@ -198,7 +198,6 @@ mod tests {
             command.args,
             vec![
                 "--die-with-parent",
-                "--new-session",
                 "--unshare-pid",
                 "--unshare-ipc",
                 "--unshare-uts",
