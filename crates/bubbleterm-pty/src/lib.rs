@@ -6,8 +6,10 @@
 #![forbid(unsafe_code)]
 
 pub mod launch;
+pub mod output;
 pub mod session;
 
 pub use launch::{CommandSpec, LaunchSpec, LaunchSpecError, ShellKind};
+pub use output::{PtyOutputEvent, PtyOutputReader};
 pub use portable_pty::PtySize;
 pub use session::PtySession;
