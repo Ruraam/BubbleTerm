@@ -4,11 +4,7 @@
 //! the keymap fd it sends and applies modifier snapshots from wl_keyboard;
 //! it never assumes a US layout or updates modifier state from raw key events.
 
-use std::{
-    fs::File,
-    io::Read,
-    os::fd::OwnedFd,
-};
+use std::{fs::File, io::Read, os::fd::OwnedFd};
 
 use anyhow::{Context, Result, ensure};
 use xkbcommon::xkb::{self, Context as XkbContext, Keymap, State};
@@ -25,8 +21,8 @@ pub struct XkbKeyboard {
 impl XkbKeyboard {
     /// Creates an XKB context. A keymap is installed after wl_keyboard sends it.
     pub fn new() -> Result<Self> {
-        let context = XkbContext::new(xkb::CONTEXT_NO_FLAGS)
-            .context("could not create the XKB context")?;
+        let context =
+            XkbContext::new(xkb::CONTEXT_NO_FLAGS).context("could not create the XKB context")?;
         Ok(Self {
             context,
             state: None,
@@ -68,22 +64,9 @@ impl XkbKeyboard {
     }
 
     /// Applies the modifier and layout snapshot sent by wl_keyboard.
-    pub fn update_modifiers(
-        &mut self,
-        depressed: u32,
-        latched: u32,
-        locked: u32,
-        group: u32,
-    ) {
+    pub fn update_modifiers(&mut self, depressed: u32, latched: u32, locked: u32, group: u32) {
         if let Some(state) = &mut self.state {
-            state.update_mask(
-                depressed,
-                latched,
-                locked,
-                0,
-                0,
-                group,
-            );
+            state.update_mask(depressed, latched, locked, 0, 0, group);
         }
     }
 
