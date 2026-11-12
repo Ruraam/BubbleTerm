@@ -71,7 +71,7 @@ impl XkbKeyboard {
 
     /// Converts an evdev keycode (as sent by wl_keyboard) to terminal bytes.
     /// Returns None until a valid keymap is installed or for non-text keys.
-    pub fn translate(&self, evdev_keycode: u32) -> Option<Vec<u8>> {
+    pub fn translate(&self, evdev_keycode: u32, application_cursor: bool) -> Option<Vec<u8>> {
         let keycode = xkb::Keycode::new(evdev_keycode.checked_add(XKB_EVDEV_OFFSET)?);
         let state = self.state.as_ref()?;
         let keysym = state.key_get_one_sym(keycode);
@@ -81,10 +81,10 @@ impl XkbKeyboard {
             xkb::Keysym::BackSpace => b"\x7f",
             xkb::Keysym::Tab => b"\t",
             xkb::Keysym::Escape => b"\x1b",
-            xkb::Keysym::Up => b"\x1b[A",
-            xkb::Keysym::Down => b"\x1b[B",
-            xkb::Keysym::Right => b"\x1b[C",
-            xkb::Keysym::Left => b"\x1b[D",
+            xkb::Keysym::Up => if application_cursor { b"\x1bOA" } else { b"\x1b[A" },
+            xkb::Keysym::Down => if application_cursor { b"\x1bOB" } else { b"\x1b[B" },
+            xkb::Keysym::Right => if application_cursor { b"\x1bOC" } else { b"\x1b[C" },
+            xkb::Keysym::Left => if application_cursor { b"\x1bOD" } else { b"\x1b[D" },
             xkb::Keysym::Home => b"\x1b[H",
             xkb::Keysym::End => b"\x1b[F",
             xkb::Keysym::Insert => b"\x1b[2~",
@@ -122,7 +122,7 @@ mod tests {
     fn starts_without_a_keymap() {
         let keyboard = XkbKeyboard::new().expect("XKB context should be available");
         assert!(!keyboard.is_ready());
-        assert_eq!(keyboard.translate(30), None);
+        assert_eq!(keyboard.translate(30, false), None);
     }
 
     #[test]
