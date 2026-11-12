@@ -15,11 +15,17 @@
 - [x] Implement PTY winsize updates and kernel SIGWINCH regression tests.
 - [x] Add Wayland surface-to-PTY resize conversion and validation.
 - [x] Wire the PTY resize adapter into the native Wayland configure/commit event loop.
+- [x] Add compositor-provided XKB keymap loading and modifier-state translation.
+- [x] Route printable keyboard input and common terminal key sequences to the PTY.
+- [ ] Add key-repeat handling and terminal-mode-aware key sequences.
 - [ ] Add VT and PTY regression fixtures.
+- [ ] Add end-to-end keyboard and resize tests with a headless Wayland compositor.
 
 ## 0.3 — Rendering
 
-- [x] Add safely bounded, resize-aware Wayland SHM placeholder buffers and compositor-release tracking.\n- [ ] Establish GPU renderer and explicit software fallback behavior.
+- [x] Add safely bounded, resize-aware Wayland SHM placeholder buffers and compositor-release tracking.
+- [ ] Connect PTY output to the VT parser and terminal grid.
+- [ ] Establish GPU renderer and explicit software fallback behavior.
 - [ ] Add font shaping, glyph atlas, HiDPI, and frame scheduling.
 - [ ] Benchmark large output and long-running sessions.
 
