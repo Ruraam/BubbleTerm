@@ -20,14 +20,13 @@ use wayland_client::{
 };
 use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
 
-use crate::{CellMetrics, SurfaceSize, keyboard::XkbKeyboard, resize_pty_for_surface};
+use crate::{CellMetrics, SurfaceSize, keyboard::XkbKeyboard, renderer::render_snapshot, resize_pty_for_surface};
 
 const INITIAL_WIDTH: u32 = 800;
 const INITIAL_HEIGHT: u32 = 600;
 const MAX_BUFFER_BYTES: u32 = 64 * 1024 * 1024;
 const MAX_BUFFER_DIMENSION: u32 = 8192;
 const WINDOW_TITLE: &str = "BubbleTerm";
-const BACKGROUND_PIXEL: [u8; 4] = [0x18, 0x18, 0x20, 0xff];
 
 /// Runs one native Wayland window until the compositor requests it to close.
 ///
@@ -106,7 +105,12 @@ pub fn run_wayland_window(session: PtySession, cell_metrics: CellMetrics) -> Res
         event_queue
             .dispatch_pending(&mut state)
             .context("Wayland pending-event dispatch failed")?;
-        drain_pty_output(&mut state);
+        if drain_pty_output(&mut state) {
+            let (width, height) = state.current_size;
+            if width > 0 && height > 0 {
+                present_surface_buffer(&mut state, width as u32, height as u32, &queue_handle)?;
+            }
+        }
         if let Some(error) = state.event_error.take() {
             bail!("Wayland window event failed: {error}");
         }
@@ -141,10 +145,14 @@ pub fn run_wayland_window(session: PtySession, cell_metrics: CellMetrics) -> Res
 ///
 /// This function is called only on the Wayland thread and never waits for
 /// additional PTY data. The reader worker owns all blocking reads.
-fn drain_pty_output(state: &mut WindowState) {
+fn drain_pty_output(state: &mut WindowState) -> bool {
+    let mut changed = false;
     loop {
         match state.pty_output.try_recv() {
-            Ok(PtyOutputEvent::Data(bytes)) => state.terminal.process(&bytes),
+            Ok(PtyOutputEvent::Data(bytes)) => {
+                state.terminal.process(&bytes);
+                changed = true;
+            },
             Ok(PtyOutputEvent::Closed) => {
                 state.pty_closed = true;
                 break;
@@ -157,6 +165,7 @@ fn drain_pty_output(state: &mut WindowState) {
             Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
         }
     }
+    changed
 }
 
 fn checked_buffer_layout(width: u32, height: u32) -> Result<(i32, i32, i32, i32)> {
@@ -192,17 +201,14 @@ fn create_surface_buffer(
     shm: &wl_shm::WlShm,
     width: u32,
     height: u32,
+    pixels: &[u8],
     queue_handle: &QueueHandle<WindowState>,
 ) -> Result<wl_buffer::WlBuffer> {
     let (width_i32, height_i32, stride_i32, pool_size) = checked_buffer_layout(width, height)?;
-    let byte_len = pool_size as u32;
+    ensure!(pixels.len() == pool_size as usize, "rendered pixel buffer has an invalid length");
 
     let mut file = tempfile::tempfile().context("could not create Wayland SHM backing file")?;
-    let mut pixels = vec![0x18; byte_len as usize];
-    for pixel in pixels.chunks_exact_mut(4) {
-        pixel.copy_from_slice(&BACKGROUND_PIXEL);
-    }
-    file.write_all(&pixels)?;
+    file.write_all(pixels)?;
     file.flush()?;
 
     let pool = shm.create_pool(file.as_fd(), pool_size, queue_handle, ());
@@ -217,6 +223,34 @@ fn create_surface_buffer(
     );
     pool.destroy();
     Ok(buffer)
+}
+
+
+/// Render the current VT snapshot and publish a fresh immutable SHM buffer.
+fn present_surface_buffer(
+    state: &mut WindowState,
+    width: u32,
+    height: u32,
+    queue_handle: &QueueHandle<WindowState>,
+) -> Result<()> {
+    let snapshot = state.terminal.snapshot();
+    let pixels = render_snapshot(&snapshot, width, height, state.cell_metrics)?;
+    let new_buffer = create_surface_buffer(&state.shm, width, height, &pixels, queue_handle)?;
+
+    if let Some(old_buffer) = state.buffer.replace(new_buffer) {
+        if state.buffer_released {
+            old_buffer.destroy();
+        } else {
+            state.retired_buffers.push(old_buffer);
+        }
+    }
+    state.buffer_released = false;
+    if let Some(buffer) = &state.buffer {
+        state.surface.attach(Some(buffer), 0, 0);
+        state.surface.damage(0, 0, width as i32, height as i32);
+    }
+    state.surface.commit();
+    Ok(())
 }
 
 struct WindowState {
@@ -389,43 +423,30 @@ impl Dispatch<xdg_surface::XdgSurface, ()> for WindowState {
                 width: width as u32,
                 height: height as u32,
             };
-            if let Err(error) = resize_pty_for_surface(&state.session, size, state.cell_metrics) {
-                state.event_error = Some(error.to_string());
-                state.running = false;
-                return;
-            }
-
-            let dimensions_changed = state.current_size != (width, height);
-            state.current_size = (width, height);
-            let mut buffer_changed = false;
-            if dimensions_changed || state.buffer.is_none() {
-                match create_surface_buffer(&state.shm, size.width, size.height, queue_handle) {
-                    Ok(new_buffer) => {
-                        if let Some(old_buffer) = state.buffer.replace(new_buffer) {
-                            if state.buffer_released {
-                                old_buffer.destroy();
-                            } else {
-                                state.retired_buffers.push(old_buffer);
-                            }
-                        }
-                        state.buffer_released = false;
-                        buffer_changed = true;
-                    }
-                    Err(error) => {
+            match resize_pty_for_surface(&state.session, size, state.cell_metrics) {
+                Ok(Some(pty_size)) => {
+                    if let Err(error) = state.terminal.resize(GridSize {
+                        columns: pty_size.cols,
+                        rows: pty_size.rows,
+                    }) {
                         state.event_error = Some(error.to_string());
                         state.running = false;
                         return;
                     }
                 }
-            }
-
-            if buffer_changed {
-                if let Some(buffer) = &state.buffer {
-                    state.surface.attach(Some(buffer), 0, 0);
-                    state.surface.damage(0, 0, width, height);
+                Ok(None) => {}
+                Err(error) => {
+                    state.event_error = Some(error.to_string());
+                    state.running = false;
+                    return;
                 }
             }
-            state.surface.commit();
+
+            state.current_size = (width, height);
+            if let Err(error) = present_surface_buffer(state, size.width, size.height, queue_handle) {
+                state.event_error = Some(error.to_string());
+                state.running = false;
+            }
         }
     }
 }
