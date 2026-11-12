@@ -422,7 +422,7 @@ mod tests {
 
     #[test]
     fn bundled_noto_font_renders_precomposed_latin_unicode() {
-        use noto_sans_mono_bitmap::{get_raster, FontWeight, RasterHeight};
+        use noto_sans_mono_bitmap::{FontWeight, RasterHeight, get_raster};
 
         for character in ['é', 'à', 'ñ', 'Ā', 'Œ', '€'] {
             assert!(
