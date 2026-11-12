@@ -39,7 +39,7 @@ GPU-accelerated rendering is paired with a controlled software fallback and a re
 
 The software renderer keeps antialiased Noto Sans Mono glyphs for supported Latin ranges and uses an embedded GNU Unifont bitmap fallback for broader Unicode coverage, including Greek, Cyrillic, and CJK. Glyph pages are decompressed lazily and cached; wide terminal cells are rendered across their two-column span.
 
-This bitmap fallback provides glyph lookup, not a complete text-shaping engine. Combining-mark positioning, complex-script shaping, bidirectional layout, and emoji sequences still require dedicated work. Do not interpret broad glyph coverage as full Unicode shaping support.
+This bitmap fallback provides glyph lookup, not a complete text-shaping engine. Common Latin combining diacritics are normalized and overlaid, but full mark positioning, complex-script shaping, bidirectional layout, and emoji sequences still require dedicated work. Do not interpret broad glyph coverage as full Unicode shaping support.
 
 Third-party font notices: `noto-sans-mono-bitmap` is distributed under its crate license; its bundled Noto font data and GNU Unifont data retain their respective upstream font licenses. GNU Unifont 14.0.01 is distributed under SIL Open Font License 1.1 and GPLv2+ with the GNU Font Embedding Exception. Preserve upstream notices when redistributing binaries. See the upstream [Unifont license information](https://unifoundry.com/unifont/index.html) and [`unifont-bitmap` crate documentation](https://docs.rs/unifont-bitmap/1.0.0+unifont-14.0.01/unifont_bitmap/).
 
