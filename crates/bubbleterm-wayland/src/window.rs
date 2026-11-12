@@ -598,7 +598,7 @@ mod tests {
         supports_xkb_keymap,
     };
     use wayland_client::WEnum;
-    use wayland_client::protocol::wl_seat;
+    use wayland_client::protocol::{wl_keyboard, wl_seat};
 
     #[test]
     fn computes_checked_shm_layout() {
