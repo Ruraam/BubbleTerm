@@ -543,6 +543,35 @@ mod tests {
     }
 
     #[test]
+    fn negative_repeat_delay_is_clamped_to_zero() {
+        let start = Instant::now();
+        let mut repeat = KeyRepeat::default();
+        repeat.configure(20, -1, start);
+        repeat.press(30, true, start);
+
+        assert_eq!(repeat.take_due(start), Some(30));
+    }
+
+    #[test]
+    fn repeat_configuration_without_active_key_does_not_schedule_input() {
+        let start = Instant::now();
+        let mut repeat = KeyRepeat::default();
+        repeat.configure(20, 0, start);
+
+        assert_eq!(repeat.take_due(start + Duration::from_secs(1)), None);
+
+        repeat.press(30, true, start + Duration::from_secs(1));
+        assert_eq!(
+            repeat.take_due(start + Duration::from_secs(1)),
+            None
+        );
+        assert_eq!(
+            repeat.take_due(start + Duration::from_secs(2)),
+            Some(30)
+        );
+    }
+
+    #[test]
     fn starts_without_a_keymap() {
         let mut keyboard = XkbKeyboard::new().expect("XKB context should be available");
         assert!(!keyboard.is_ready());
