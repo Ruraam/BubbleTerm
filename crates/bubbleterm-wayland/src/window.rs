@@ -81,12 +81,7 @@ pub fn run_wayland_window(session: PtySession, cell_metrics: CellMetrics) -> Res
     Ok(())
 }
 
-fn create_surface_buffer(
-    shm: &wl_shm::WlShm,
-    width: u32,
-    height: u32,
-    queue_handle: &QueueHandle<WindowState>,
-) -> Result<wl_buffer::WlBuffer> {
+fn checked_buffer_layout(width: u32, height: u32) -> Result<(i32, i32, i32, i32)> {
     ensure!(
         width > 0 && height > 0,
         "Wayland buffer dimensions must be non-zero"
@@ -107,10 +102,23 @@ fn create_surface_buffer(
         "Wayland buffer exceeds the 64 MiB safety limit"
     );
 
-    let width_i32 = i32::try_from(width).context("Wayland buffer width exceeds i32")?;
-    let height_i32 = i32::try_from(height).context("Wayland buffer height exceeds i32")?;
-    let stride_i32 = i32::try_from(stride).context("Wayland buffer stride exceeds i32")?;
-    let pool_size = i32::try_from(byte_len).context("Wayland SHM pool exceeds i32")?;
+    Ok((
+        i32::try_from(width).context("Wayland buffer width exceeds i32")?,
+        i32::try_from(height).context("Wayland buffer height exceeds i32")?,
+        i32::try_from(stride).context("Wayland buffer stride exceeds i32")?,
+        i32::try_from(byte_len).context("Wayland SHM pool exceeds i32")?,
+    ))
+}
+
+fn create_surface_buffer(
+    shm: &wl_shm::WlShm,
+    width: u32,
+    height: u32,
+    queue_handle: &QueueHandle<WindowState>,
+) -> Result<wl_buffer::WlBuffer> {
+    let (width_i32, height_i32, stride_i32, pool_size) =
+        checked_buffer_layout(width, height)?;
+    let byte_len = pool_size as u32;
 
     let mut file = tempfile::tempfile().context("could not create Wayland SHM backing file")?;
     // Keep a slightly blue-tinted neutral background without depending on a
@@ -238,6 +246,7 @@ impl Dispatch<xdg_surface::XdgSurface, ()> for WindowState {
 
             let dimensions_changed = state.current_size != (width, height);
             state.current_size = (width, height);
+            let mut buffer_changed = false;
             if dimensions_changed || state.buffer.is_none() {
                 match create_surface_buffer(&state.shm, size.width, size.height, queue_handle) {
                     Ok(new_buffer) => {
@@ -249,6 +258,7 @@ impl Dispatch<xdg_surface::XdgSurface, ()> for WindowState {
                             }
                         }
                         state.buffer_released = false;
+                        buffer_changed = true;
                     }
                     Err(error) => {
                         state.resize_error = Some(error.to_string());
@@ -258,9 +268,11 @@ impl Dispatch<xdg_surface::XdgSurface, ()> for WindowState {
                 }
             }
 
-            if let Some(buffer) = &state.buffer {
-                state.surface.attach(Some(buffer), 0, 0);
-                state.surface.damage(0, 0, width, height);
+            if buffer_changed {
+                if let Some(buffer) = &state.buffer {
+                    state.surface.attach(Some(buffer), 0, 0);
+                    state.surface.damage(0, 0, width, height);
+                }
             }
             state.surface.commit();
         }
@@ -285,5 +297,27 @@ impl Dispatch<xdg_toplevel::XdgToplevel, ()> for WindowState {
             xdg_toplevel::Event::Close => state.running = false,
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::checked_buffer_layout;
+
+    #[test]
+    fn computes_checked_shm_layout() {
+        assert_eq!(checked_buffer_layout(800, 600).unwrap(), (800, 600, 3200, 1_920_000));
+    }
+
+    #[test]
+    fn rejects_empty_buffer_dimensions() {
+        assert!(checked_buffer_layout(0, 600).is_err());
+        assert!(checked_buffer_layout(800, 0).is_err());
+    }
+
+    #[test]
+    fn rejects_oversized_buffer_dimensions() {
+        assert!(checked_buffer_layout(8193, 600).is_err());
+        assert!(checked_buffer_layout(8192, 8192).is_err());
     }
 }
