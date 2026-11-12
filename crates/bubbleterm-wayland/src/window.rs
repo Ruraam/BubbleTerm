@@ -176,7 +176,8 @@ impl Dispatch<xdg_surface::XdgSurface, ()> for WindowState {
                     width: width as u32,
                     height: height as u32,
                 };
-                if let Err(error) = resize_pty_for_surface(state.session, size, state.cell_metrics) {
+                if let Err(error) = resize_pty_for_surface(state.session, size, state.cell_metrics)
+                {
                     state.resize_error = Some(error.to_string());
                     state.running = false;
                     return;
