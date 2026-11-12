@@ -1,0 +1,35 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/bubbleterm-app",
+    "crates/bubbleterm-core",
+    "crates/bubbleterm-vt",
+    "crates/bubbleterm-pty",
+    "crates/bubbleterm-wayland",
+    "crates/bubbleterm-renderer",
+    "crates/bubbleterm-ui",
+    "crates/bubbleterm-config",
+    "crates/bubbleterm-security",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "LicenseRef-Proprietary"
+repository = "https://github.com/Ruraam/BubbleTerm"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "deny", priority = -1 }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
