@@ -3,6 +3,9 @@ use anyhow::{Result, ensure};
 use bubbleterm_vt::{GridSnapshot, TerminalCell, TerminalColor};
 use font8x8::{BASIC_FONTS, UnicodeFonts};
 use unicode_normalization::UnicodeNormalization;
+use std::sync::{Mutex, OnceLock};
+
+static UNIFONT: OnceLock<Mutex<unifont_bitmap::Unifont>> = OnceLock::new();
 
 use crate::CellMetrics;
 
@@ -130,23 +133,33 @@ fn draw_cell(target: &mut RenderTarget, x: u32, y: u32, metrics: CellMetrics, ce
         foreground = (foreground.0 / 2, foreground.1 / 2, foreground.2 / 2);
     }
 
-    target.fill_rect(x, y, metrics.width, metrics.height, background);
-    if cell.wide_continuation || cell.text.is_empty() {
+    if cell.wide_continuation {
         return;
     }
 
-    // BASIC_FONTS is embedded in the binary. Unsupported Unicode currently
-    // receives a visible replacement glyph rather than depending on host fonts.
-    let character = cell.text.nfc().next().unwrap_or(' ');
-    if !character.is_ascii()
-        && !is_custom_unicode_glyph(character)
-        && draw_noto_glyph(target, x, y, metrics, character, foreground, cell.bold)
-    {
-        if cell.underline && metrics.height > 1 {
-            let underline_y = y + metrics.height - 2;
-            target.fill_rect(x, underline_y, metrics.width, 1, foreground);
-        }
+    let cell_width = if cell.wide {
+        metrics.width.saturating_mul(2)
+    } else {
+        metrics.width
+    };
+    target.fill_rect(x, y, cell_width, metrics.height, background);
+    if cell.text.is_empty() {
         return;
+    }
+
+    // Keep antialiased Noto rendering for Latin, then use embedded GNU
+    // Unifont as a broad Unicode fallback, including CJK.
+    let character = cell.text.nfc().next().unwrap_or(' ');
+    if !character.is_ascii() && !is_custom_unicode_glyph(character) {
+        let rendered = draw_noto_glyph(target, x, y, metrics, character, foreground, cell.bold)
+            || draw_unifont_glyph(target, x, y, metrics, character, foreground, cell.wide);
+        if rendered {
+            if cell.underline && metrics.height > 1 {
+                let underline_y = y + metrics.height - 2;
+                target.fill_rect(x, underline_y, cell_width, 1, foreground);
+            }
+            return;
+        }
     }
 
     let Some(glyph) = glyph_bitmap(character) else {
@@ -262,6 +275,57 @@ fn draw_noto_glyph(
                     blend(foreground.2, background_blue),
                 ),
             );
+        }
+    }
+    true
+}
+
+/// Render an embedded GNU Unifont glyph. Unicode pages are decompressed lazily
+/// and cached across render calls.
+fn draw_unifont_glyph(
+    target: &mut RenderTarget,
+    x: u32,
+    y: u32,
+    metrics: CellMetrics,
+    character: char,
+    foreground: (u8, u8, u8),
+    wide_cell: bool,
+) -> bool {
+    let cache = UNIFONT.get_or_init(|| Mutex::new(unifont_bitmap::Unifont::open()));
+    let Ok(mut font) = cache.lock() else {
+        return false;
+    };
+    let bitmap = font.load_bitmap(u32::from(character));
+    let (source_width, source_height): (usize, usize) = bitmap.get_dimensions();
+    let bytes = bitmap.get_bytes();
+    let pitch = source_width / 8;
+    if source_width == 0 || source_height != 16 || pitch == 0 || bytes.len() != pitch * 16 {
+        return false;
+    }
+
+    let destination_width = if wide_cell {
+        metrics.width.saturating_mul(2)
+    } else {
+        metrics.width
+    };
+    if destination_width == 0 || metrics.height == 0 {
+        return false;
+    }
+    let draw_width = destination_width.min(target.width.saturating_sub(x));
+    let draw_height = metrics.height.min(target.height.saturating_sub(y));
+    if draw_width == 0 || draw_height == 0 {
+        return false;
+    }
+
+    for dy in 0..draw_height {
+        let source_y = (dy as usize * source_height) / draw_height as usize;
+        for dx in 0..draw_width {
+            let source_x = (dx as usize * source_width) / destination_width as usize;
+            let byte_index = source_y * pitch + source_x / 8;
+            let mask = 0x80 >> (source_x % 8);
+            if bytes[byte_index] & mask != 0 {
+                target.set_pixel(x + dx, y + dy, foreground);
+            }
         }
     }
     true
@@ -460,6 +524,25 @@ mod tests {
                 .any(|pixel| pixel[0..3] != [32, 24, 24]),
             "accented glyph should paint visible pixels"
         );
+    }
+
+    #[test]
+    fn unifont_renders_greek_cyrillic_and_cjk_without_host_fonts() {
+        for character in ['Ω', 'Ж', '界'] {
+            let mut terminal = Terminal::new(GridSize::new(2, 1).unwrap(), 0).unwrap();
+            terminal.process(character.to_string().as_bytes());
+            let image = render_snapshot(
+                &terminal.snapshot(),
+                16,
+                16,
+                CellMetrics { width: 8, height: 16 },
+            )
+            .unwrap();
+            assert!(
+                image.chunks_exact(4).any(|pixel| pixel[0..3] != [32, 24, 24]),
+                "Unicode glyph {character:?} should render visible pixels"
+            );
+        }
     }
 
     #[test]
