@@ -9,7 +9,7 @@ use std::io::{Read, Write};
 
 use anyhow::Result;
 use portable_pty::{
-    Child, CommandBuilder, ExitStatus, MasterPty, PtySize, PtySystem, native_pty_system,
+    Child, CommandBuilder, ExitStatus, MasterPty, PtySize, native_pty_system,
 };
 
 use crate::{LaunchSpec, ShellKind};
@@ -57,12 +57,12 @@ impl PtySession {
 
     /// Clone a reader for the PTY output stream.
     pub fn try_clone_reader(&self) -> Result<Box<dyn Read + Send>> {
-        Ok(self.master.try_clone_reader()?)
+        self.master.try_clone_reader().map_err(Into::into)
     }
 
     /// Take the single writer for sending keyboard input to the PTY.
     pub fn take_writer(&self) -> Result<Box<dyn Write + Send>> {
-        Ok(self.master.take_writer()?)
+        self.master.take_writer().map_err(Into::into)
     }
 
     /// Update the kernel PTY winsize. The kernel sends SIGWINCH to the
@@ -78,7 +78,7 @@ impl PtySession {
 
     /// Return the winsize currently stored by the kernel.
     pub fn size(&self) -> Result<PtySize> {
-        Ok(self.master.get_size()?)
+        self.master.get_size().map_err(Into::into)
     }
 
     /// Poll the child without blocking.
