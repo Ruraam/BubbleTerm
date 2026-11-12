@@ -193,9 +193,7 @@ impl XkbKeyboard {
                 compose.reset();
                 (!fallback.is_empty()).then(|| fallback.into_bytes())
             }
-            xkb::compose::Status::Nothing => {
-                (!fallback.is_empty()).then(|| fallback.into_bytes())
-            }
+            xkb::compose::Status::Nothing => (!fallback.is_empty()).then(|| fallback.into_bytes()),
         }
     }
 
