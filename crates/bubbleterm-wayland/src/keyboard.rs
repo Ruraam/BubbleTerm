@@ -6,7 +6,7 @@
 
 use std::{
     fs::File,
-    io::{Read, Seek, SeekFrom},
+    io::Read,
     os::fd::OwnedFd,
 };
 
@@ -119,6 +119,11 @@ impl XkbKeyboard {
         };
 
         Some(sequence.to_vec())
+    }
+
+    /// Clears the active keymap when the seat loses keyboard capability.
+    pub fn clear_keymap(&mut self) {
+        self.state = None;
     }
 
     /// Whether a compositor keymap has been installed.
