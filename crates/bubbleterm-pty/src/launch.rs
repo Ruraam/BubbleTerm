@@ -54,7 +54,9 @@ impl LaunchSpec {
             }
             if let Some(directory) = &self.working_directory {
                 if !directory.is_absolute() {
-                    return Err(LaunchSpecError::WorkingDirectoryNotAbsolute(directory.clone()));
+                    return Err(LaunchSpecError::WorkingDirectoryNotAbsolute(
+                        directory.clone(),
+                    ));
                 }
             }
         }
@@ -109,7 +111,10 @@ impl LaunchSpec {
                 args.push(self.shell.as_os_str().to_owned());
                 args.extend(self.args.iter().cloned());
 
-                Ok(CommandSpec { program: PathBuf::from("bwrap"), args })
+                Ok(CommandSpec {
+                    program: PathBuf::from("bwrap"),
+                    args,
+                })
             }
         }
     }
@@ -129,10 +134,18 @@ impl std::fmt::Display for LaunchSpecError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::EmptyShell => f.write_str("shell executable cannot be empty"),
-            Self::RootfsNotAbsolute(path) => write!(f, "BubbleOS rootfs must be absolute: {}", path.display()),
-            Self::RootfsCannotBeHostRoot => f.write_str("BubbleOS rootfs cannot be the host root directory"),
-            Self::BubbleShellNotAbsolute(path) => write!(f, "sandbox shell path must be absolute: {}", path.display()),
-            Self::WorkingDirectoryNotAbsolute(path) => write!(f, "working directory must be absolute: {}", path.display()),
+            Self::RootfsNotAbsolute(path) => {
+                write!(f, "BubbleOS rootfs must be absolute: {}", path.display())
+            }
+            Self::RootfsCannotBeHostRoot => {
+                f.write_str("BubbleOS rootfs cannot be the host root directory")
+            }
+            Self::BubbleShellNotAbsolute(path) => {
+                write!(f, "sandbox shell path must be absolute: {}", path.display())
+            }
+            Self::WorkingDirectoryNotAbsolute(path) => {
+                write!(f, "working directory must be absolute: {}", path.display())
+            }
         }
     }
 }
@@ -148,7 +161,10 @@ mod tests {
             shell: PathBuf::from("/bin/bash"),
             args: vec![OsString::from("--login")],
             working_directory: Some(PathBuf::from("/workspace")),
-            environment: BTreeMap::from([(OsString::from("TERM"), OsString::from("xterm-256color"))]),
+            environment: BTreeMap::from([(
+                OsString::from("TERM"),
+                OsString::from("xterm-256color"),
+            )]),
             kind,
         }
     }
@@ -165,7 +181,9 @@ mod tests {
         let command = spec(ShellKind::Bubble {
             rootfs: PathBuf::from("/var/lib/bubbleos/rootfs"),
             read_only: true,
-        }).command_spec().unwrap();
+        })
+        .command_spec()
+        .unwrap();
         assert_eq!(command.program, PathBuf::from("bwrap"));
         assert!(command.args.windows(3).any(|w| {
             w == [OsString::from("--ro-bind"), OsString::from("/var/lib/bubbleos/rootfs"), OsString::from("/")]
@@ -186,7 +204,11 @@ mod tests {
     #[test]
     fn rejects_relative_rootfs() {
         assert_eq!(
-            spec(ShellKind::Bubble { rootfs: PathBuf::from("rootfs"), read_only: true }).validate(),
+            spec(ShellKind::Bubble {
+                rootfs: PathBuf::from("rootfs"),
+                read_only: true
+            })
+            .validate(),
             Err(LaunchSpecError::RootfsNotAbsolute(PathBuf::from("rootfs")))
         );
     }
@@ -194,7 +216,11 @@ mod tests {
     #[test]
     fn rejects_host_root_as_bubble_rootfs() {
         assert_eq!(
-            spec(ShellKind::Bubble { rootfs: PathBuf::from("/"), read_only: true }).validate(),
+            spec(ShellKind::Bubble {
+                rootfs: PathBuf::from("/"),
+                read_only: true
+            })
+            .validate(),
             Err(LaunchSpecError::RootfsCannotBeHostRoot)
         );
     }
