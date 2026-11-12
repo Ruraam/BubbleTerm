@@ -586,7 +586,7 @@ mod tests {
     #[test]
     fn renders_multiple_uncomposable_combining_diacritics() {
         let mut decorated = Terminal::new(GridSize::new(1, 1).unwrap(), 0).unwrap();
-        decorated.process("x\\u{0301}\\u{0323}".as_bytes());
+        decorated.process("x\u{0301}\u{0323}".as_bytes());
         let mut plain = Terminal::new(GridSize::new(1, 1).unwrap(), 0).unwrap();
         plain.process(b"x");
         let decorated_image = render_snapshot(&decorated.snapshot(), 8, 8, metrics()).unwrap();
