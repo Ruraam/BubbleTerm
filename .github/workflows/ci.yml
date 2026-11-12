@@ -44,7 +44,7 @@ jobs:
       - name: Prepare minimal Bubblewrap test rootfs
         run: |
           rootfs="$RUNNER_TEMP/bubbleterm-rootfs"
-          mkdir -p "$rootfs/bin"
+          mkdir -p "$rootfs/bin" "$rootfs/proc" "$rootfs/dev" "$rootfs/tmp"
           install -m 0755 "$(command -v busybox)" "$rootfs/bin/busybox"
           "$rootfs/bin/busybox" --install -s "$rootfs/bin"
           test -x "$rootfs/bin/sh"
