@@ -2,8 +2,8 @@
 use anyhow::{Result, ensure};
 use bubbleterm_vt::{GridSnapshot, TerminalCell, TerminalColor};
 use font8x8::{BASIC_FONTS, UnicodeFonts};
-use unicode_normalization::UnicodeNormalization;
 use std::sync::{Mutex, OnceLock};
+use unicode_normalization::UnicodeNormalization;
 
 static UNIFONT: OnceLock<Mutex<unifont_bitmap::Unifont>> = OnceLock::new();
 
