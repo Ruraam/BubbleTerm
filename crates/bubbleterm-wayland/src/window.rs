@@ -58,6 +58,7 @@ pub fn run_wayland_window(session: PtySession, cell_metrics: CellMetrics) -> Res
         surface,
         buffer,
         pending_size: None,
+        current_size: (INITIAL_WIDTH as i32, INITIAL_HEIGHT as i32),
         configured: false,
         running: true,
         resize_error: None,
@@ -118,6 +119,7 @@ struct WindowState {
     surface: wl_surface::WlSurface,
     buffer: wl_buffer::WlBuffer,
     pending_size: Option<(i32, i32)>,
+    current_size: (i32, i32),
     configured: bool,
     running: bool,
     resize_error: Option<String>,
@@ -167,10 +169,8 @@ impl Dispatch<xdg_surface::XdgSurface, ()> for WindowState {
     ) {
         if let xdg_surface::Event::Configure { serial } = event {
             xdg_surface.ack_configure(serial);
-            let (width, height) = state
-                .pending_size
-                .take()
-                .unwrap_or((INITIAL_WIDTH as i32, INITIAL_HEIGHT as i32));
+            let (width, height) = state.pending_size.take().unwrap_or(state.current_size);
+            state.current_size = (width, height);
             if width > 0 && height > 0 {
                 let size = SurfaceSize {
                     width: width as u32,
