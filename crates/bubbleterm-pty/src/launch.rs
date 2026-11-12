@@ -80,7 +80,10 @@ impl LaunchSpec {
             ShellKind::Bubble { rootfs, read_only } => {
                 let mut args = vec![
                     OsString::from("--die-with-parent"),
-                    OsString::from("--new-session"),
+                    // portable-pty establishes a new session and assigns the PTY
+                    // slave as its controlling terminal before exec. Do not ask
+                    // bubblewrap to create another session: setsid() would detach
+                    // the controlling TTY and break job control/SIGWINCH delivery.
                     OsString::from("--unshare-pid"),
                     OsString::from("--unshare-ipc"),
                     OsString::from("--unshare-uts"),
