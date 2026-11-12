@@ -4,7 +4,12 @@
 //! snapshots. Keyboard input is translated using the compositor-provided XKB
 //! keymap. Fractional scaling and a full Unicode font remain future work.
 
-use std::{io::Write, os::fd::AsFd, sync::mpsc::TryRecvError};
+use std::{
+    io::Write,
+    os::fd::AsFd,
+    sync::mpsc::TryRecvError,
+    time::Instant,
+};
 
 use anyhow::{Context, Result, bail, ensure};
 use bubbleterm_pty::{PtyOutputEvent, PtyOutputReader, PtySession};
@@ -21,7 +26,7 @@ use wayland_client::{
 use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
 
 use crate::{
-    CellMetrics, SurfaceSize, keyboard::XkbKeyboard, renderer::render_snapshot,
+    CellMetrics, SurfaceSize, keyboard::{KeyRepeat, XkbKeyboard}, renderer::render_snapshot,
     resize_pty_for_surface,
 };
 
@@ -86,6 +91,7 @@ pub fn run_wayland_window(session: PtySession, cell_metrics: CellMetrics) -> Res
         surface,
         keyboard: None,
         xkb: XkbKeyboard::new()?,
+        key_repeat: KeyRepeat::default(),
         buffer: None,
         buffer_released: false,
         retired_buffers: Vec::new(),
@@ -109,6 +115,7 @@ pub fn run_wayland_window(session: PtySession, cell_metrics: CellMetrics) -> Res
         event_queue
             .dispatch_pending(&mut state)
             .context("Wayland pending-event dispatch failed")?;
+        dispatch_key_repeat(&mut state);
         if drain_pty_output(&mut state) && state.configured {
             let (width, height) = state.current_size;
             if width > 0 && height > 0 {
@@ -143,6 +150,24 @@ pub fn run_wayland_window(session: PtySession, cell_metrics: CellMetrics) -> Res
     // Keep the bound seat alive for as long as its keyboard proxy may exist.
     drop(seat);
     Ok(())
+}
+
+
+/// Emit at most one due repeat per event-loop iteration.
+fn dispatch_key_repeat(state: &mut WindowState) {
+    let Some(key) = state.key_repeat.take_due(Instant::now()) else {
+        return;
+    };
+    let application_cursor = state.terminal.application_cursor();
+    let Some(bytes) = state.xkb.translate(key, application_cursor) else {
+        return;
+    };
+    if let Some(writer) = state.pty_writer.as_mut() {
+        if let Err(error) = writer.write_all(&bytes).and_then(|_| writer.flush()) {
+            state.event_error = Some(error.to_string());
+            state.running = false;
+        }
+    }
 }
 
 /// Drain all currently available PTY output into the VT parser.
@@ -270,6 +295,7 @@ struct WindowState {
     surface: wl_surface::WlSurface,
     keyboard: Option<wl_keyboard::WlKeyboard>,
     xkb: XkbKeyboard,
+    key_repeat: KeyRepeat,
     buffer: Option<wl_buffer::WlBuffer>,
     buffer_released: bool,
     retired_buffers: Vec<wl_buffer::WlBuffer>,
@@ -343,6 +369,7 @@ impl Dispatch<wl_seat::WlSeat, ()> for WindowState {
             } else if !has_keyboard {
                 state.keyboard = None;
                 state.xkb.clear_keymap();
+                state.key_repeat.clear();
             }
         }
     }
@@ -360,6 +387,7 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WindowState {
         match event {
             wl_keyboard::Event::Keymap { format, fd, size } => {
                 if format == WEnum::Value(wl_keyboard::KeymapFormat::XkbV1) {
+                    state.key_repeat.clear();
                     if let Err(error) = state.xkb.install_keymap(fd, size) {
                         state.event_error = Some(error.to_string());
                         state.running = false;
@@ -375,6 +403,9 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WindowState {
             } => state
                 .xkb
                 .update_modifiers(mods_depressed, mods_latched, mods_locked, group),
+            wl_keyboard::Event::RepeatInfo { rate, delay } => {
+                state.key_repeat.configure(rate, delay, Instant::now());
+            }
             wl_keyboard::Event::Key {
                 key,
                 state: WEnum::Value(wl_keyboard::KeyState::Pressed),
@@ -389,7 +420,14 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WindowState {
                         }
                     }
                 }
+                state.key_repeat.press(key, state.xkb.is_repeatable(key), Instant::now());
             }
+            wl_keyboard::Event::Key {
+                key,
+                state: WEnum::Value(wl_keyboard::KeyState::Released),
+                ..
+            } => state.key_repeat.release(key),
+            wl_keyboard::Event::Leave { .. } => state.key_repeat.clear(),
             _ => {}
         }
     }
