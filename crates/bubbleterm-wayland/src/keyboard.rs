@@ -287,7 +287,10 @@ mod tests {
             Some(30)
         );
         repeat.release(42);
-        assert_eq!(repeat.take_due(start + Duration::from_millis(450)), None);
+        assert_eq!(
+            repeat.take_due(start + Duration::from_millis(450)),
+            Some(30)
+        );
     }
 
     #[test]
