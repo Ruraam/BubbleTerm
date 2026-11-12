@@ -312,6 +312,23 @@ mod tests {
 <Multi_key> <o> <c> : "©" U00A9
 "#;
 
+    fn keyboard_with_layouts(layouts: &str) -> XkbKeyboard {
+        let mut keyboard = XkbKeyboard::new().expect("XKB context should be available");
+        let keymap = Keymap::new_from_names(
+            &keyboard.context,
+            &"",
+            &"",
+            &layouts,
+            &"",
+            None,
+            xkb::KEYMAP_COMPILE_NO_FLAGS,
+        )
+        .expect("test XKB keymap should compile");
+        keyboard.state = Some(State::new(&keymap));
+        keyboard.keymap = Some(keymap);
+        keyboard
+    }
+
     #[test]
     fn dead_acute_composes_with_e() {
         let mut keyboard = keyboard_with_compose_table(TEST_COMPOSE_TABLE);
@@ -399,6 +416,32 @@ mod tests {
             keyboard.translate_text(xkb::Keysym::c, "c".to_owned()),
             Some(b"c".to_vec())
         );
+    }
+
+    #[test]
+    fn compositor_group_snapshot_switches_active_layout() {
+        let mut keyboard = keyboard_with_layouts("us,de");
+
+        // Linux evdev KEY_Y (21) maps to Y in US and Z in German QWERTZ.
+        assert_eq!(keyboard.translate(21, false), Some(b"y".to_vec()));
+
+        keyboard.update_modifiers(0, 0, 0, 1);
+
+        assert_eq!(keyboard.translate(21, false), Some(b"z".to_vec()));
+    }
+
+    #[test]
+    fn altgr_modifier_snapshot_selects_third_level_unicode_symbol() {
+        let mut keyboard = keyboard_with_layouts("de");
+        let keymap = keyboard.keymap.as_ref().expect("keymap should be installed");
+        let mod5 = keymap.mod_get_index("Mod5");
+        assert_ne!(mod5, xkb::MOD_INVALID);
+        let altgr_mask = 1_u32 << mod5;
+
+        // On the German layout, AltGr+E produces the Euro sign.
+        keyboard.update_modifiers(altgr_mask, 0, 0, 0);
+
+        assert_eq!(keyboard.translate(18, false), Some("€".as_bytes().to_vec()));
     }
 
     #[test]
