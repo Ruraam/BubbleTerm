@@ -191,7 +191,7 @@ fn draw_noto_glyph(
     character: char,
     foreground: (u8, u8, u8),
 ) -> bool {
-    use noto_sans_mono_bitmap::{get_raster, FontWeight, RasterHeight};
+    use noto_sans_mono_bitmap::{FontWeight, RasterHeight, get_raster};
 
     let Some(glyph) = get_raster(character, FontWeight::Regular, RasterHeight::Size16) else {
         return false;
@@ -220,8 +220,8 @@ fn draw_noto_glyph(
             if coverage == 0 {
                 continue;
             }
-            let background_offset = (((y + y_offset + dy) * target.stride)
-                + ((x + x_offset + dx) * 4)) as usize;
+            let background_offset =
+                (((y + y_offset + dy) * target.stride) + ((x + x_offset + dx) * 4)) as usize;
             if background_offset + 3 >= target.pixels.len() {
                 continue;
             }
@@ -250,8 +250,24 @@ fn draw_noto_glyph(
 fn is_custom_unicode_glyph(character: char) -> bool {
     matches!(
         character,
-        '─' | '│' | '┌' | '┐' | '└' | '┘' | '├' | '┤' | '┬' | '┴' | '┼'
-            | '█' | '▀' | '▄' | '▌' | '▐' | '░' | '▒' | '▓'
+        '─' | '│'
+            | '┌'
+            | '┐'
+            | '└'
+            | '┘'
+            | '├'
+            | '┤'
+            | '┬'
+            | '┴'
+            | '┼'
+            | '█'
+            | '▀'
+            | '▄'
+            | '▌'
+            | '▐'
+            | '░'
+            | '▒'
+            | '▓'
     )
 }
 
@@ -419,7 +435,9 @@ mod tests {
         terminal.process("é".as_bytes());
         let image = render_snapshot(&terminal.snapshot(), 8, 8, metrics()).unwrap();
         assert!(
-            image.chunks_exact(4).any(|pixel| pixel[0..3] != [32, 24, 24]),
+            image
+                .chunks_exact(4)
+                .any(|pixel| pixel[0..3] != [32, 24, 24]),
             "accented glyph should paint visible pixels"
         );
     }
