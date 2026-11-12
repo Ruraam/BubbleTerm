@@ -70,8 +70,8 @@ pub fn run_wayland_window(session: PtySession, cell_metrics: CellMetrics) -> Res
         10_000,
     )
     .context("could not initialize the VT parser")?;
-    let pty_output = PtyOutputReader::spawn(&session)
-        .context("could not start the PTY output reader")?;
+    let pty_output =
+        PtyOutputReader::spawn(&session).context("could not start the PTY output reader")?;
 
     let mut state = WindowState {
         session,
@@ -111,16 +111,15 @@ pub fn run_wayland_window(session: PtySession, cell_metrics: CellMetrics) -> Res
             bail!("Wayland window event failed: {error}");
         }
 
-        event_queue.flush().context("Wayland request flush failed")?;
+        event_queue
+            .flush()
+            .context("Wayland request flush failed")?;
         let Some(read_guard) = event_queue.prepare_read() else {
             continue;
         };
-        let mut poll_fds = [PollFd::new(
-            read_guard.connection_fd(),
-            PollFlags::POLLIN,
-        )];
-        let poll_result = poll(&mut poll_fds, 8_u16)
-            .context("could not poll the Wayland connection")?;
+        let mut poll_fds = [PollFd::new(read_guard.connection_fd(), PollFlags::POLLIN)];
+        let poll_result =
+            poll(&mut poll_fds, 8_u16).context("could not poll the Wayland connection")?;
         let socket_ready = poll_result > 0
             && poll_fds[0].revents().is_some_and(|flags| {
                 flags.intersects(PollFlags::POLLIN | PollFlags::POLLHUP | PollFlags::POLLERR)
@@ -128,9 +127,7 @@ pub fn run_wayland_window(session: PtySession, cell_metrics: CellMetrics) -> Res
         drop(poll_fds);
 
         if socket_ready {
-            read_guard
-                .read()
-                .context("could not read Wayland events")?;
+            read_guard.read().context("could not read Wayland events")?;
         }
         // Dropping the guard on timeout cancels the prepared read. PTY output
         // is drained on the next iteration without blocking the UI thread.
