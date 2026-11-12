@@ -230,7 +230,14 @@ mod tests {
         assert!(GridSize::new(0, 24).is_none());
         assert!(GridSize::new(80, 0).is_none());
         assert_eq!(
-            Terminal::new(GridSize { columns: 0, rows: 24 }, 0).err(),
+            Terminal::new(
+                GridSize {
+                    columns: 0,
+                    rows: 24
+                },
+                0
+            )
+            .err(),
             Some(TerminalError::EmptyGrid)
         );
     }
@@ -260,7 +267,13 @@ mod tests {
         let snapshot = terminal.snapshot();
         assert_eq!(snapshot.cell(0, 0).unwrap().text, "h");
         assert_eq!(snapshot.cell(0, 6).unwrap().text, "é");
-        assert_eq!(snapshot.size, GridSize { columns: 12, rows: 2 });
+        assert_eq!(
+            snapshot.size,
+            GridSize {
+                columns: 12,
+                rows: 2
+            }
+        );
     }
 
     #[test]
