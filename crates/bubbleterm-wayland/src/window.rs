@@ -116,8 +116,7 @@ fn create_surface_buffer(
     height: u32,
     queue_handle: &QueueHandle<WindowState>,
 ) -> Result<wl_buffer::WlBuffer> {
-    let (width_i32, height_i32, stride_i32, pool_size) =
-        checked_buffer_layout(width, height)?;
+    let (width_i32, height_i32, stride_i32, pool_size) = checked_buffer_layout(width, height)?;
     let byte_len = pool_size as u32;
 
     let mut file = tempfile::tempfile().context("could not create Wayland SHM backing file")?;
@@ -306,7 +305,10 @@ mod tests {
 
     #[test]
     fn computes_checked_shm_layout() {
-        assert_eq!(checked_buffer_layout(800, 600).unwrap(), (800, 600, 3200, 1_920_000));
+        assert_eq!(
+            checked_buffer_layout(800, 600).unwrap(),
+            (800, 600, 3200, 1_920_000)
+        );
     }
 
     #[test]
