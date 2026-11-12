@@ -146,7 +146,7 @@ mod tests {
             shell: "/bin/sh".into(),
             args: vec![
                 "-c".into(),
-                "test -t 0 || exit 31; trap 'printf \\\"WINCH\\\\n\\\"' WINCH; printf 'READY\\n'; while :; do sleep 0.05; done".into(),
+                "test -t 0 || exit 31; trap 'echo WINCH' WINCH; echo READY; while :; do sleep 0.05; done".into(),
             ],
             working_directory: None,
             environment: Default::default(),
