@@ -24,10 +24,7 @@ pub struct CellMetrics {
 /// returns `None`, leaving the previous PTY size unchanged. Cell metrics
 /// must always be non-zero. Cell counts use floor division so partially
 /// visible cells are never exposed to the terminal application.
-pub fn pty_size_for_surface(
-    surface: SurfaceSize,
-    cell: CellMetrics,
-) -> Result<Option<PtySize>> {
+pub fn pty_size_for_surface(surface: SurfaceSize, cell: CellMetrics) -> Result<Option<PtySize>> {
     ensure!(
         cell.width > 0 && cell.height > 0,
         "terminal cell dimensions must be non-zero"
@@ -39,13 +36,16 @@ pub fn pty_size_for_surface(
 
     let cols = surface.width / cell.width;
     let rows = surface.height / cell.height;
-    ensure!(cols > 0 && rows > 0, "surface is smaller than one terminal cell");
+    ensure!(
+        cols > 0 && rows > 0,
+        "surface is smaller than one terminal cell"
+    );
 
     let size = PtySize {
         rows: u16::try_from(rows)?,
         cols: u16::try_from(cols)?,
-        pixel_width: surface.width.min(u32::from(u16::MAX)) as u16,
-        pixel_height: surface.height.min(u32::from(u16::MAX)) as u16,
+        pixel_width: u16::try_from(surface.width.min(u32::from(u16::MAX)))?,
+        pixel_height: u16::try_from(surface.height.min(u32::from(u16::MAX)))?,
     };
 
     Ok(Some(size))
