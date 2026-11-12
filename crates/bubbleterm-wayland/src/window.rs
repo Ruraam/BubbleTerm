@@ -124,7 +124,6 @@ pub fn run_wayland_window(session: PtySession, cell_metrics: CellMetrics) -> Res
             && poll_fds[0].revents().is_some_and(|flags| {
                 flags.intersects(PollFlags::POLLIN | PollFlags::POLLHUP | PollFlags::POLLERR)
             });
-        drop(poll_fds);
 
         if socket_ready {
             read_guard.read().context("could not read Wayland events")?;
