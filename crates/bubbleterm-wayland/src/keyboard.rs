@@ -160,7 +160,6 @@ impl XkbKeyboard {
     }
 }
 
-
 /// Client-side implementation of the repeat timing advertised by wl_keyboard.
 #[derive(Debug, Default)]
 pub struct KeyRepeat {
@@ -228,7 +227,6 @@ mod tests {
     use super::*;
     use std::time::Instant;
 
-
     #[test]
     fn key_repeat_obeys_delay_rate_and_release() {
         let start = Instant::now();
@@ -237,9 +235,15 @@ mod tests {
         repeat.press(30, true, start);
 
         assert_eq!(repeat.take_due(start + Duration::from_millis(499)), None);
-        assert_eq!(repeat.take_due(start + Duration::from_millis(500)), Some(30));
+        assert_eq!(
+            repeat.take_due(start + Duration::from_millis(500)),
+            Some(30)
+        );
         assert_eq!(repeat.take_due(start + Duration::from_millis(549)), None);
-        assert_eq!(repeat.take_due(start + Duration::from_millis(550)), Some(30));
+        assert_eq!(
+            repeat.take_due(start + Duration::from_millis(550)),
+            Some(30)
+        );
 
         repeat.release(30);
         assert_eq!(repeat.take_due(start + Duration::from_secs(2)), None);
