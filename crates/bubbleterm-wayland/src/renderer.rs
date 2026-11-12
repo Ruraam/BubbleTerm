@@ -2,6 +2,7 @@
 use anyhow::{Result, ensure};
 use bubbleterm_vt::{GridSnapshot, TerminalCell, TerminalColor};
 use font8x8::{BASIC_FONTS, UnicodeFonts};
+use unicode_normalization::UnicodeNormalization;
 
 use crate::CellMetrics;
 
@@ -136,7 +137,7 @@ fn draw_cell(target: &mut RenderTarget, x: u32, y: u32, metrics: CellMetrics, ce
 
     // BASIC_FONTS is embedded in the binary. Unsupported Unicode currently
     // receives a visible replacement glyph rather than depending on host fonts.
-    let character = cell.text.chars().next().unwrap_or(' ');
+    let character = cell.text.nfc().next().unwrap_or(' ');
     if !character.is_ascii()
         && !is_custom_unicode_glyph(character)
         && draw_noto_glyph(target, x, y, metrics, character, foreground)
@@ -442,6 +443,18 @@ mod tests {
         );
     }
 
+    #[test]
+    fn decomposed_latin_accents_render_like_precomposed_glyphs() {
+        let mut decomposed = Terminal::new(GridSize::new(1, 1).unwrap(), 0).unwrap();
+        decomposed.process("e\\u{301}".as_bytes());
+
+        let mut precomposed = Terminal::new(GridSize::new(1, 1).unwrap(), 0).unwrap();
+        precomposed.process("é".as_bytes());
+
+        let decomposed_image = render_snapshot(&decomposed.snapshot(), 8, 8, metrics()).unwrap();
+        let precomposed_image = render_snapshot(&precomposed.snapshot(), 8, 8, metrics()).unwrap();
+        assert_eq!(decomposed_image, precomposed_image);
+    }
     #[test]
     fn unsupported_unicode_uses_visible_replacement_glyph() {
         let fallback = glyph_bitmap('?').expect("replacement glyph must exist");
