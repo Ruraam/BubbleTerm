@@ -490,12 +490,11 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WindowState {
                     state.key_repeat.clear();
                 }
             }
-            wl_keyboard::Event::Leave { .. } => {
-                if state.keyboard_lifecycle.leave() {
-                    state.key_repeat.clear();
-                    state.xkb.clear_modifiers();
-                }
+            wl_keyboard::Event::Leave { .. } if state.keyboard_lifecycle.leave() => {
+                state.key_repeat.clear();
+                state.xkb.clear_modifiers();
             }
+            wl_keyboard::Event::Leave { .. } => {}
             _ => {}
         }
     }
@@ -614,5 +613,43 @@ mod tests {
     fn rejects_oversized_buffer_dimensions() {
         assert!(checked_buffer_layout(8193, 600).is_err());
         assert!(checked_buffer_layout(8192, 8192).is_err());
+    }
+
+    #[test]
+    fn keyboard_capability_transitions_are_idempotent() {
+        let mut lifecycle = KeyboardLifecycle::default();
+        assert_eq!(lifecycle.update_capability(true), CapabilityChange::Added);
+        assert_eq!(lifecycle.update_capability(true), CapabilityChange::Unchanged);
+        assert_eq!(lifecycle.update_capability(false), CapabilityChange::Removed);
+        assert_eq!(lifecycle.update_capability(false), CapabilityChange::Unchanged);
+    }
+
+    #[test]
+    fn focus_transitions_require_an_available_keyboard() {
+        let mut lifecycle = KeyboardLifecycle::default();
+        assert!(!lifecycle.enter());
+        assert_eq!(lifecycle.update_capability(true), CapabilityChange::Added);
+        assert!(lifecycle.enter());
+        assert!(!lifecycle.enter());
+        assert!(lifecycle.leave());
+        assert!(!lifecycle.leave());
+    }
+
+    #[test]
+    fn removing_keyboard_capability_discards_focus() {
+        let mut lifecycle = KeyboardLifecycle::default();
+        lifecycle.update_capability(true);
+        assert!(lifecycle.enter());
+        assert_eq!(lifecycle.update_capability(false), CapabilityChange::Removed);
+        assert!(!lifecycle.leave());
+        assert!(!lifecycle.enter());
+    }
+
+    #[test]
+    fn detects_keyboard_capability_in_known_and_unknown_masks() {
+        assert!(has_keyboard_capability(WEnum::Value(wl_seat::Capability::Keyboard)));
+        assert!(!has_keyboard_capability(WEnum::Value(wl_seat::Capability::Pointer)));
+        assert!(has_keyboard_capability(WEnum::Unknown(0b010)));
+        assert!(!has_keyboard_capability(WEnum::Unknown(0b001)));
     }
 }
