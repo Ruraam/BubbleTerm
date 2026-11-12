@@ -1,15 +1,10 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/bubbleterm-app",
     "crates/bubbleterm-core",
     "crates/bubbleterm-vt",
     "crates/bubbleterm-pty",
     "crates/bubbleterm-wayland",
-    "crates/bubbleterm-renderer",
-    "crates/bubbleterm-ui",
-    "crates/bubbleterm-config",
-    "crates/bubbleterm-security",
 ]
 
 [workspace.package]
