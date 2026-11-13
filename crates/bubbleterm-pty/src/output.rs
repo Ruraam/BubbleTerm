@@ -7,7 +7,10 @@
 use std::{
     io::{self, Read},
     sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TryRecvError},
-    sync::{Arc, atomic::{AtomicBool, Ordering}},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     thread::{self, JoinHandle},
     time::Duration,
 };
@@ -152,7 +155,10 @@ fn read_loop_unix(
                 break;
             }
             Ok(count) => {
-                if sender.send(PtyOutputEvent::Data(buffer[..count].to_vec())).is_err() {
+                if sender
+                    .send(PtyOutputEvent::Data(buffer[..count].to_vec()))
+                    .is_err()
+                {
                     break;
                 }
             }
@@ -322,7 +328,10 @@ mod tests {
             "dropping a silent reader should not wait for child output"
         );
         assert!(
-            session.try_wait().expect("child status should be readable").is_none(),
+            session
+                .try_wait()
+                .expect("child status should be readable")
+                .is_none(),
             "dropping reader must not terminate child"
         );
     }
