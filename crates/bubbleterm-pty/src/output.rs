@@ -698,16 +698,12 @@ mod tests {
             let mut received = Vec::new();
             let mut closed_events = 0;
             loop {
-                let remaining =
-                    event_deadline.saturating_duration_since(std::time::Instant::now());
+                let remaining = event_deadline.saturating_duration_since(std::time::Instant::now());
                 assert!(
                     !remaining.is_zero(),
                     "PTY closure timed out on iteration {iteration}"
                 );
-                match output
-                    .recv_timeout(remaining)
-                    .expect("PTY event timed out")
-                {
+                match output.recv_timeout(remaining).expect("PTY event timed out") {
                     PtyOutputEvent::Data(chunk) => received.extend_from_slice(&chunk),
                     PtyOutputEvent::Closed => {
                         closed_events += 1;
@@ -720,7 +716,9 @@ mod tests {
             }
 
             assert!(
-                received.windows(MARKER.len()).any(|window| window == MARKER),
+                received
+                    .windows(MARKER.len())
+                    .any(|window| window == MARKER),
                 "final output was lost on iteration {iteration}"
             );
             assert_eq!(
@@ -791,9 +789,7 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(2));
             }
 
-            let drop_duration = dropper
-                .join()
-                .expect("reader drop thread should not panic");
+            let drop_duration = dropper.join().expect("reader drop thread should not panic");
             assert!(
                 drop_duration < Duration::from_secs(2),
                 "reader drop raced with child exit and stalled on iteration {iteration}: {drop_duration:?}"
