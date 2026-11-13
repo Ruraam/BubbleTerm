@@ -461,9 +461,7 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WindowState {
         // the seat has already advertised a replacement keyboard.
         let event_id = keyboard.id();
         let active_id = state.keyboard.as_ref().map(Proxy::id);
-        if !state.keyboard_lifecycle.available
-            || !is_active_proxy(active_id.as_ref(), &event_id)
-        {
+        if !state.keyboard_lifecycle.available || !is_active_proxy(active_id.as_ref(), &event_id) {
             return;
         }
 
