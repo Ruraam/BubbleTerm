@@ -35,15 +35,9 @@ impl Drop for PtySession {
                 .and_then(|pid| i32::try_from(pid).ok())
             {
                 let process_group = nix::unistd::Pid::from_raw(-pid);
-                let _ = nix::sys::signal::kill(
-                    process_group,
-                    nix::sys::signal::Signal::SIGHUP,
-                );
+                let _ = nix::sys::signal::kill(process_group, nix::sys::signal::Signal::SIGHUP);
                 std::thread::sleep(std::time::Duration::from_millis(50));
-                let _ = nix::sys::signal::kill(
-                    process_group,
-                    nix::sys::signal::Signal::SIGKILL,
-                );
+                let _ = nix::sys::signal::kill(process_group, nix::sys::signal::Signal::SIGKILL);
             }
         }
 
@@ -261,8 +255,7 @@ mod tests {
     #[test]
     fn dropping_session_terminates_background_process_group_members() {
         use std::{
-            fs,
-            thread,
+            fs, thread,
             time::{Duration, Instant, SystemTime, UNIX_EPOCH},
         };
 
