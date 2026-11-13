@@ -275,8 +275,8 @@ mod tests {
             ],
             working_directory: None,
             environment: [(
-                "BUBBLETERM_TEST_CHILD_PID_FILE".to_owned(),
-                pid_file.to_string_lossy().into_owned(),
+                std::ffi::OsString::from("BUBBLETERM_TEST_CHILD_PID_FILE"),
+                pid_file.as_os_str().to_owned(),
             )]
             .into_iter()
             .collect(),
