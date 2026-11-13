@@ -354,10 +354,8 @@ impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for WindowState {
                 version,
             } if interface == "wl_seat" => {
                 if state.seat_registry.register(name, version) && state.seat.is_none() {
-                    state.seat = Some((
-                        name,
-                        registry.bind(name, version.min(9), queue_handle, ()),
-                    ));
+                    state.seat =
+                        Some((name, registry.bind(name, version.min(9), queue_handle, ())));
                 }
             }
             wl_registry::Event::GlobalRemove { name } => {
@@ -365,7 +363,11 @@ impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for WindowState {
                     return;
                 }
 
-                if state.seat.as_ref().is_some_and(|(active_name, _)| *active_name == name) {
+                if state
+                    .seat
+                    .as_ref()
+                    .is_some_and(|(active_name, _)| *active_name == name)
+                {
                     destroy_active_seat(state);
                     if let Some(next) = state.seat_registry.preferred() {
                         state.seat = Some((
