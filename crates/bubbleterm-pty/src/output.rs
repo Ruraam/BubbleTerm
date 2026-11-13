@@ -73,9 +73,7 @@ impl PtyOutputReader {
                 .context("could not access the PTY master descriptor")?;
             thread::Builder::new()
                 .name("bubbleterm-pty-output".to_owned())
-                .spawn(move || {
-                    read_loop_unix(&mut reader, master_fd, sender, worker_cancellation)
-                })
+                .spawn(move || read_loop_unix(&mut reader, master_fd, sender, worker_cancellation))
                 .context("could not start the PTY output worker")?
         };
 
@@ -124,8 +122,8 @@ fn read_loop_unix(
     sender: SyncSender<PtyOutputEvent>,
     cancellation: Arc<AtomicBool>,
 ) {
-    use mio::{Events, Interest, Poll, Token};
     use mio::unix::SourceFd;
+    use mio::{Events, Interest, Poll, Token};
 
     let mut poll = match Poll::new() {
         Ok(poll) => poll,
@@ -450,8 +448,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn output_reader_preserves_blocking_mode_for_large_pty_writes() {
-        use std::io::Write;
         use nix::fcntl::{FcntlArg, OFlag, fcntl};
+        use std::io::Write;
 
         let spec = LaunchSpec {
             shell: "/bin/sh".into(),
@@ -480,7 +478,10 @@ mod tests {
         while !ready {
             let remaining = deadline.saturating_duration_since(std::time::Instant::now());
             assert!(!remaining.is_zero(), "PTY child did not become ready");
-            match output.recv_timeout(remaining).expect("PTY output timed out") {
+            match output
+                .recv_timeout(remaining)
+                .expect("PTY output timed out")
+            {
                 PtyOutputEvent::Data(chunk) => {
                     ready = chunk.windows(5).any(|window| window == b"READY");
                 }
@@ -489,8 +490,11 @@ mod tests {
             }
         }
 
-        let flags = fcntl(session.raw_fd().expect("PTY master fd should be available"), FcntlArg::F_GETFL)
-            .expect("PTY master flags should be readable");
+        let flags = fcntl(
+            session.raw_fd().expect("PTY master fd should be available"),
+            FcntlArg::F_GETFL,
+        )
+        .expect("PTY master flags should be readable");
         assert!(
             !OFlag::from_bits_truncate(flags).contains(OFlag::O_NONBLOCK),
             "starting the output reader must not make PTY writes nonblocking"
@@ -501,7 +505,9 @@ mod tests {
             payload.extend(std::iter::repeat_n(b'x', 255));
             payload.push(b'\n');
         }
-        let mut writer = session.take_writer().expect("PTY writer should be available");
+        let mut writer = session
+            .take_writer()
+            .expect("PTY writer should be available");
         writer
             .write_all(&payload)
             .expect("large PTY paste should complete without WouldBlock");
@@ -532,7 +538,11 @@ mod tests {
         }
 
         let (sender, receiver) = mpsc::sync_channel(2);
-        super::read_loop_unix_unpolled(&mut FailingReader, sender, Arc::new(AtomicBool::new(false)));
+        super::read_loop_unix_unpolled(
+            &mut FailingReader,
+            sender,
+            Arc::new(AtomicBool::new(false)),
+        );
 
         assert_eq!(
             receiver
