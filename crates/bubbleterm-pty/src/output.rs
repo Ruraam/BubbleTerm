@@ -33,8 +33,7 @@ pub enum PtyOutputEvent {
 /// consumer catches up.
 pub struct PtyOutputReader {
     receiver: Option<Receiver<PtyOutputEvent>>,
-    // Dropping JoinHandle detaches the worker; joining could block forever
-    // while the PTY read waits for the child to exit.
+    // Joined during Drop after the owning PtySession has terminated its child.
     worker: Option<JoinHandle<()>>,
 }
 
@@ -134,6 +133,33 @@ mod tests {
     use crate::{LaunchSpec, PtySession, ShellKind};
     use portable_pty::PtySize;
     use std::time::Duration;
+
+    #[test]
+    fn dropping_session_unblocks_and_joins_the_output_worker() {
+        let spec = LaunchSpec {
+            shell: "/bin/sh".into(),
+            args: vec!["-c".into(), "exec sleep 30".into()],
+            working_directory: None,
+            environment: Default::default(),
+            kind: ShellKind::Host,
+        };
+        let session = PtySession::spawn(
+            &spec,
+            PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            },
+        )
+        .expect("PTY should spawn");
+        let output = PtyOutputReader::spawn(&session).expect("reader should start");
+
+        // Terminating the PTY child closes the slave side, waking the
+        // blocking reader. Dropping the reader then joins its worker.
+        drop(session);
+        drop(output);
+    }
 
     #[test]
     fn receives_child_output_off_the_caller_thread() {
