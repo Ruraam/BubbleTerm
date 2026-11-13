@@ -32,10 +32,22 @@ pub enum PtyOutputEvent {
 /// slower than the child process. The worker naturally pauses while the
 /// consumer catches up.
 pub struct PtyOutputReader {
-    receiver: Receiver<PtyOutputEvent>,
+    receiver: Option<Receiver<PtyOutputEvent>>,
     // Dropping JoinHandle detaches the worker; joining could block forever
     // while the PTY read waits for the child to exit.
-    _worker: JoinHandle<()>,
+    worker: Option<JoinHandle<()>>,
+}
+
+impl Drop for PtyOutputReader {
+    fn drop(&mut self) {
+        // Close the receiving side first so a worker blocked on the bounded
+        // channel wakes up. WindowState drops its PtySession before this
+        // reader, which kills/reaps the child and unblocks a pending PTY read.
+        self.receiver.take();
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
 }
 
 impl PtyOutputReader {
@@ -51,14 +63,16 @@ impl PtyOutputReader {
             .context("could not start the PTY output worker")?;
 
         Ok(Self {
-            receiver,
-            _worker: worker,
+            receiver: Some(receiver),
+            worker: Some(worker),
         })
     }
 
     /// Receive the next event without waiting.
     pub fn try_recv(&self) -> std::result::Result<PtyOutputEvent, TryRecvError> {
-        self.receiver.try_recv()
+        self.receiver
+            .as_ref()
+            .map_or(Err(TryRecvError::Disconnected), Receiver::try_recv)
     }
 
     /// Receive the next event, waiting for at most the supplied duration.
@@ -66,7 +80,10 @@ impl PtyOutputReader {
         &self,
         timeout: Duration,
     ) -> std::result::Result<PtyOutputEvent, RecvTimeoutError> {
-        self.receiver.recv_timeout(timeout)
+        self.receiver.as_ref().map_or(
+            Err(RecvTimeoutError::Disconnected),
+            |receiver| receiver.recv_timeout(timeout),
+        )
     }
 }
 
