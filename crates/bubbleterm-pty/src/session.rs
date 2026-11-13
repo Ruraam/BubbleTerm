@@ -12,6 +12,27 @@ use portable_pty::{Child, CommandBuilder, ExitStatus, MasterPty, PtySize, native
 
 use crate::{LaunchSpec, ShellKind};
 
+/// An independently owned duplicate of the PTY master descriptor.
+///
+/// The output worker owns this descriptor so it remains valid even if the
+/// session's master is closed before the worker has finished shutting down.
+#[cfg(unix)]
+pub(crate) struct PtyMasterFd(std::os::fd::RawFd);
+
+#[cfg(unix)]
+impl PtyMasterFd {
+    pub(crate) fn as_raw_fd(&self) -> std::os::fd::RawFd {
+        self.0
+    }
+}
+
+#[cfg(unix)]
+impl Drop for PtyMasterFd {
+    fn drop(&mut self) {
+        let _ = nix::unistd::close(self.0);
+    }
+}
+
 /// A running child attached to a PTY master.
 pub struct PtySession {
     master: Box<dyn MasterPty + Send>,
@@ -89,6 +110,16 @@ impl PtySession {
     /// Clone a reader for the PTY output stream.
     pub fn try_clone_reader(&self) -> Result<Box<dyn Read + Send>> {
         self.master.try_clone_reader()
+    }
+
+    /// Duplicate the PTY master descriptor for an independently owned worker.
+    #[cfg(unix)]
+    pub(crate) fn try_clone_raw_fd(&self) -> Result<PtyMasterFd> {
+        let fd = nix::fcntl::fcntl(
+            self.raw_fd()?,
+            nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(0),
+        )?;
+        Ok(PtyMasterFd(fd))
     }
 
     /// Return the PTY master descriptor for readiness polling.
