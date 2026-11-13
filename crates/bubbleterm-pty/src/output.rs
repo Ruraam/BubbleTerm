@@ -448,6 +448,68 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn preserves_repeated_output_bursts_and_interleaved_markers() {
+        const BURST_COUNT: usize = 32;
+        const BURST_SIZE: usize = 4096;
+
+        let spec = LaunchSpec {
+            shell: "/bin/sh".into(),
+            args: vec![
+                "-c".into(),
+                "i=0; while [ \"$i\" -lt 32 ]; do printf 'BEGIN-%02d\\n' \"$i\"; printf '%4096s' '' | tr ' ' x; printf '\\nEND-%02d\\n' \"$i\"; i=$((i + 1)); sleep 0.01; done".into(),
+            ],
+            working_directory: None,
+            environment: Default::default(),
+            kind: ShellKind::Host,
+        };
+        let session = PtySession::spawn(
+            &spec,
+            PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            },
+        )
+        .expect("PTY should spawn");
+        let output = PtyOutputReader::spawn(&session).expect("output reader should start");
+
+        let mut expected = Vec::with_capacity(BURST_COUNT * (BURST_SIZE + 24));
+        for index in 0..BURST_COUNT {
+            expected.extend_from_slice(format!("BEGIN-{index:02}\r\n").as_bytes());
+            expected.extend(std::iter::repeat_n(b'x', BURST_SIZE));
+            expected.extend_from_slice(format!("\r\nEND-{index:02}\r\n").as_bytes());
+        }
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        let mut received = Vec::with_capacity(expected.len());
+        loop {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            assert!(
+                !remaining.is_zero(),
+                "PTY burst output timed out after receiving {} of {} bytes",
+                received.len(),
+                expected.len()
+            );
+            match output
+                .recv_timeout(remaining)
+                .expect("PTY burst output event timed out")
+            {
+                PtyOutputEvent::Data(chunk) => received.extend_from_slice(&chunk),
+                PtyOutputEvent::Closed => break,
+                PtyOutputEvent::Error(error) => panic!("PTY reader failed: {error}"),
+            }
+        }
+
+        assert_eq!(
+            received, expected,
+            "repeated PTY bursts must preserve every byte, marker, and stream ordering"
+        );
+        drop(output);
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn receives_large_contiguous_output_without_losing_bytes() {
         const EXPECTED_BYTES: usize = 1024 * 1024;
 
