@@ -798,6 +798,60 @@ mod tests {
     }
 
     #[test]
+    fn rapid_capability_cycles_require_a_fresh_focus_enter() {
+        let mut lifecycle = KeyboardLifecycle::default();
+
+        assert_eq!(lifecycle.update_capability(true), CapabilityChange::Added);
+        assert!(lifecycle.enter());
+        assert!(lifecycle.accepts_input());
+
+        assert_eq!(
+            lifecycle.update_capability(false),
+            CapabilityChange::Removed
+        );
+        assert!(!lifecycle.accepts_input());
+
+        // A rapid re-add creates an available keyboard, not an implicitly
+        // focused one. Input remains blocked until its own Enter event.
+        assert_eq!(lifecycle.update_capability(true), CapabilityChange::Added);
+        assert!(!lifecycle.accepts_input());
+        assert!(!lifecycle.leave());
+        assert!(lifecycle.enter());
+        assert!(lifecycle.accepts_input());
+
+        // Duplicate capability notifications must not disturb the new focus.
+        assert_eq!(
+            lifecycle.update_capability(true),
+            CapabilityChange::Unchanged
+        );
+        assert!(lifecycle.accepts_input());
+    }
+
+    #[test]
+    fn late_repeat_configuration_after_focus_loss_cannot_schedule_a_key() {
+        let now = Instant::now();
+        let mut lifecycle = KeyboardLifecycle::default();
+        let mut repeat = KeyRepeat::default();
+
+        lifecycle.update_capability(true);
+        assert!(lifecycle.enter());
+        repeat.configure(30, 250, now);
+        repeat.press(30, true, now);
+
+        assert!(lifecycle.leave());
+        repeat.clear();
+
+        // RepeatInfo may still arrive for the active proxy after Leave. It
+        // can update compositor settings, but cannot recreate a held key.
+        repeat.configure(20, 100, now + Duration::from_millis(300));
+        assert!(!lifecycle.accepts_input());
+        assert_eq!(repeat.take_due(now + Duration::from_secs(2)), None);
+
+        assert!(lifecycle.enter());
+        assert_eq!(repeat.take_due(now + Duration::from_secs(3)), None);
+    }
+
+    #[test]
     fn detects_keyboard_capability_in_known_and_unknown_masks() {
         assert!(has_keyboard_capability(WEnum::Value(
             wl_seat::Capability::Keyboard
