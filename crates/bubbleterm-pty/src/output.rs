@@ -704,15 +704,7 @@ mod tests {
                     "PTY closure timed out on iteration {iteration}"
                 );
                 match output.recv_timeout(remaining).expect("PTY event timed out") {
-                    PtyOutputEvent::Data(chunk) => {
-                        received.extend_from_slice(&chunk);
-                        if !stream_ready_sent && received.len() >= 16 * 1024 {
-                            stream_ready_sender
-                                .send(())
-                                .expect("test should still be waiting for the output threshold");
-                            stream_ready_sent = true;
-                        }
-                    },
+                    PtyOutputEvent::Data(chunk) => received.extend_from_slice(&chunk),
                     PtyOutputEvent::Closed => {
                         closed_events += 1;
                         break;
@@ -1174,7 +1166,15 @@ mod tests {
                     .recv_timeout(remaining)
                     .expect("PTY output timed out during SIGHUP teardown")
                 {
-                    PtyOutputEvent::Data(chunk) => received.extend_from_slice(&chunk),
+                    PtyOutputEvent::Data(chunk) => {
+                        received.extend_from_slice(&chunk);
+                        if !stream_ready_sent && received.len() >= 16 * 1024 {
+                            stream_ready_sender
+                                .send(())
+                                .expect("test should still be waiting for the output threshold");
+                            stream_ready_sent = true;
+                        }
+                    },
                     PtyOutputEvent::Closed => break,
                     PtyOutputEvent::Error(error) => {
                         panic!("PTY reader failed during SIGHUP teardown: {error}")
