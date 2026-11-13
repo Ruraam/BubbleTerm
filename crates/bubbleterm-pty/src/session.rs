@@ -115,10 +115,7 @@ impl PtySession {
     /// Duplicate the PTY master descriptor for an independently owned worker.
     #[cfg(unix)]
     pub(crate) fn try_clone_raw_fd(&self) -> Result<PtyMasterFd> {
-        let fd = nix::fcntl::fcntl(
-            self.raw_fd()?,
-            nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(0),
-        )?;
+        let fd = nix::fcntl::fcntl(self.raw_fd()?, nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(0))?;
         Ok(PtyMasterFd(fd))
     }
 
@@ -412,6 +409,7 @@ mod tests {
         };
         assert_eq!(status.exit_code(), 23);
     }
+
     #[test]
     fn resize_rejects_zero_cell_dimensions() {
         let spec = LaunchSpec {
