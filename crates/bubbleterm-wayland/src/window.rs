@@ -634,6 +634,8 @@ mod tests {
         CapabilityChange, KeyboardLifecycle, checked_buffer_layout, has_keyboard_capability,
         supports_xkb_keymap,
     };
+    use crate::keyboard::KeyRepeat;
+    use std::time::{Duration, Instant};
     use wayland_client::WEnum;
     use wayland_client::protocol::{wl_keyboard, wl_seat};
 
@@ -726,6 +728,80 @@ mod tests {
             wl_keyboard::KeymapFormat::NoKeymap
         )));
         assert!(!supports_xkb_keymap(WEnum::Unknown(2)));
+    }
+
+
+    #[test]
+    fn focus_loss_clears_repeat_and_refocus_does_not_resume_a_stale_key() {
+        let now = Instant::now();
+        let mut lifecycle = KeyboardLifecycle::default();
+        let mut repeat = KeyRepeat::default();
+        lifecycle.update_capability(true);
+        assert!(lifecycle.enter());
+        repeat.configure(30, 400, now);
+        repeat.press(30, true, now);
+        assert_eq!(repeat.take_due(now + Duration::from_millis(400)), Some(30));
+
+        assert!(lifecycle.leave());
+        repeat.clear();
+        assert!(lifecycle.enter());
+
+        assert_eq!(repeat.take_due(now + Duration::from_secs(2)), None);
+        repeat.press(31, true, now + Duration::from_secs(2));
+        assert_eq!(
+            repeat.take_due(now + Duration::from_millis(2_399)),
+            None
+        );
+        assert_eq!(
+            repeat.take_due(now + Duration::from_millis(2_400)),
+            Some(31)
+        );
+    }
+
+    #[test]
+    fn keyboard_capability_removal_clears_repeat_across_reconnection() {
+        let now = Instant::now();
+        let mut lifecycle = KeyboardLifecycle::default();
+        let mut repeat = KeyRepeat::default();
+        lifecycle.update_capability(true);
+        assert!(lifecycle.enter());
+        repeat.configure(25, 300, now);
+        repeat.press(44, true, now);
+
+        assert_eq!(
+            lifecycle.update_capability(false),
+            CapabilityChange::Removed
+        );
+        repeat.clear();
+        assert!(!lifecycle.accepts_input());
+        assert_eq!(repeat.take_due(now + Duration::from_secs(2)), None);
+
+        assert_eq!(lifecycle.update_capability(true), CapabilityChange::Added);
+        assert!(lifecycle.enter());
+        assert_eq!(repeat.take_due(now + Duration::from_secs(3)), None);
+    }
+
+    #[test]
+    fn keymap_replacement_cannot_replay_a_key_from_the_previous_layout() {
+        let now = Instant::now();
+        let mut repeat = KeyRepeat::default();
+        repeat.configure(20, 250, now);
+        repeat.press(21, true, now);
+
+        // The Keymap event clears repeat before installing either a new or
+        // unsupported keymap, so no physical key from the old map survives.
+        repeat.clear();
+
+        assert_eq!(repeat.take_due(now + Duration::from_secs(1)), None);
+        repeat.press(22, true, now + Duration::from_secs(1));
+        assert_eq!(
+            repeat.take_due(now + Duration::from_millis(1_249)),
+            None
+        );
+        assert_eq!(
+            repeat.take_due(now + Duration::from_millis(1_250)),
+            Some(22)
+        );
     }
 
     #[test]
