@@ -394,11 +394,7 @@ mod tests {
     fn reports_non_terminal_read_errors_once() {
         use std::{
             io,
-            sync::{
-                Arc,
-                atomic::AtomicBool,
-                mpsc,
-            },
+            sync::{Arc, atomic::AtomicBool, mpsc},
         };
 
         struct FailingReader;
@@ -413,14 +409,12 @@ mod tests {
         }
 
         let (sender, receiver) = mpsc::sync_channel(2);
-        super::read_loop_unix(
-            &mut FailingReader,
-            sender,
-            Arc::new(AtomicBool::new(false)),
-        );
+        super::read_loop_unix(&mut FailingReader, sender, Arc::new(AtomicBool::new(false)));
 
         assert_eq!(
-            receiver.recv().expect("reader should report its I/O failure"),
+            receiver
+                .recv()
+                .expect("reader should report its I/O failure"),
             PtyOutputEvent::Error("simulated PTY read failure".to_owned())
         );
         assert!(
