@@ -45,7 +45,7 @@ pub struct PtyOutputReader {
 impl Drop for PtyOutputReader {
     fn drop(&mut self) {
         // Close the receiving side first so a worker blocked on the bounded
-        // channel wakes up. On Unix, the poll loop also observes cancellation
+        // channel wakes up. On Unix, nonblocking reads observe cancellation
         // while the child is silent. Other platforms still rely on the owning
         // session being dropped first to interrupt a blocking PTY read.
         self.receiver.take();
@@ -65,12 +65,12 @@ impl PtyOutputReader {
 
         #[cfg(unix)]
         let worker = {
-            let (mut reader, poll_fd) = session
-                .try_clone_reader_with_poll_fd()
+            let mut reader = session
+                .try_clone_nonblocking_reader()
                 .context("could not clone the PTY output reader")?;
             thread::Builder::new()
                 .name("bubbleterm-pty-output".to_owned())
-                .spawn(move || read_loop_unix(&mut reader, sender, poll_fd, worker_cancellation))
+                .spawn(move || read_loop_unix(&mut reader, sender, worker_cancellation))
                 .context("could not start the PTY output worker")?
         };
 
@@ -116,39 +116,14 @@ impl PtyOutputReader {
 fn read_loop_unix(
     reader: &mut dyn Read,
     sender: SyncSender<PtyOutputEvent>,
-    poll_fd: std::os::fd::OwnedFd,
     cancellation: Arc<AtomicBool>,
 ) {
-    use std::os::fd::AsRawFd;
-
     let mut buffer = [0_u8; 16 * 1024];
-    let mut descriptor = libc::pollfd {
-        fd: poll_fd.as_raw_fd(),
-        events: libc::POLLIN | libc::POLLHUP | libc::POLLERR,
-        revents: 0,
-    };
 
     loop {
         if cancellation.load(Ordering::Acquire) {
             break;
         }
-        descriptor.revents = 0;
-        let ready = unsafe { libc::poll(&mut descriptor, 1, 100) };
-        if ready == 0 {
-            continue;
-        }
-        if ready < 0 {
-            let error = io::Error::last_os_error();
-            if error.kind() == io::ErrorKind::Interrupted {
-                continue;
-            }
-            let _ = sender.send(PtyOutputEvent::Error(error.to_string()));
-            break;
-        }
-        if cancellation.load(Ordering::Acquire) {
-            break;
-        }
-
         match reader.read(&mut buffer) {
             Ok(0) => {
                 let _ = sender.send(PtyOutputEvent::Closed);
@@ -167,7 +142,9 @@ fn read_loop_unix(
                 break;
             }
             Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => continue,
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(10));
+            }
             Err(error) => {
                 let _ = sender.send(PtyOutputEvent::Error(error.to_string()));
                 break;
@@ -241,7 +218,7 @@ mod tests {
             environment: Default::default(),
             kind: ShellKind::Host,
         };
-        let mut session = PtySession::spawn(
+        let session = PtySession::spawn(
             &spec,
             PtySize {
                 rows: 24,
@@ -309,7 +286,7 @@ mod tests {
             environment: Default::default(),
             kind: ShellKind::Host,
         };
-        let session = PtySession::spawn(
+        let mut session = PtySession::spawn(
             &spec,
             PtySize {
                 rows: 24,
