@@ -782,7 +782,10 @@ mod tests {
 
         assert_eq!(
             registry.preferred(),
-            Some(SeatGlobal { name: 7, version: 8 })
+            Some(SeatGlobal {
+                name: 7,
+                version: 8
+            })
         );
     }
 
