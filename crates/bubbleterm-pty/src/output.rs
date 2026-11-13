@@ -388,4 +388,44 @@ mod tests {
         let _ = session.wait();
         drop(output);
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn reports_non_terminal_read_errors_once() {
+        use std::{
+            io,
+            sync::{
+                Arc,
+                atomic::AtomicBool,
+                mpsc,
+            },
+        };
+
+        struct FailingReader;
+
+        impl std::io::Read for FailingReader {
+            fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+                Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "simulated PTY read failure",
+                ))
+            }
+        }
+
+        let (sender, receiver) = mpsc::sync_channel(2);
+        super::read_loop_unix(
+            &mut FailingReader,
+            sender,
+            Arc::new(AtomicBool::new(false)),
+        );
+
+        assert_eq!(
+            receiver.recv().expect("reader should report its I/O failure"),
+            PtyOutputEvent::Error("simulated PTY read failure".to_owned())
+        );
+        assert!(
+            receiver.try_recv().is_err(),
+            "a terminal read failure must end the worker without duplicate events"
+        );
+    }
 }
