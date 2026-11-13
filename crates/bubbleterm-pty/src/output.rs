@@ -794,7 +794,8 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]    #[test]
+    #[cfg(unix)]
+    #[test]
     fn preserves_repeated_output_bursts_and_interleaved_markers() {
         const BURST_COUNT: usize = 32;
         const BURST_SIZE: usize = 4096;
