@@ -18,6 +18,48 @@ use xkbcommon::xkb::{self, Context as XkbContext, Keymap, State};
 const MAX_KEYMAP_BYTES: u32 = 1024 * 1024;
 const XKB_EVDEV_OFFSET: u32 = 8;
 
+/// Builds xterm-compatible function-key sequences, including modifier parameters.
+fn function_key_sequence(keysym: xkb::Keysym, state: &xkb::State) -> Option<Vec<u8>> {
+    let (number, final_byte, tilde_form) = match keysym {
+        xkb::Keysym::F1 => (1, b'P', false),
+        xkb::Keysym::F2 => (1, b'Q', false),
+        xkb::Keysym::F3 => (1, b'R', false),
+        xkb::Keysym::F4 => (1, b'S', false),
+        xkb::Keysym::F5 => (15, 0, true),
+        xkb::Keysym::F6 => (17, 0, true),
+        xkb::Keysym::F7 => (18, 0, true),
+        xkb::Keysym::F8 => (19, 0, true),
+        xkb::Keysym::F9 => (20, 0, true),
+        xkb::Keysym::F10 => (21, 0, true),
+        xkb::Keysym::F11 => (23, 0, true),
+        xkb::Keysym::F12 => (24, 0, true),
+        _ => return None,
+    };
+
+    let mut modifier = 1;
+    for (name, value) in [("Shift", 1), ("Mod1", 2), ("Control", 4), ("Mod4", 8)] {
+        if state.mod_name_is_active(name, xkb::STATE_MODS_EFFECTIVE) {
+            modifier += value;
+        }
+    }
+
+    if modifier == 1 {
+        return Some(if tilde_form {
+            format!("\x1b[{number}~").into_bytes()
+        } else {
+            vec![0x1b, b'O', final_byte]
+        });
+    }
+
+    Some(if tilde_form {
+        format!("\x1b[{number};{modifier}~").into_bytes()
+    } else {
+        format!("\x1b[{number};{modifier}{}", final_byte as char).into_bytes()
+    })
+}
+
+
+
 /// Stateful translator for the compositor-provided XKB keymap.
 pub struct XkbKeyboard {
     context: XkbContext,
@@ -105,6 +147,10 @@ impl XkbKeyboard {
         let state = self.state.as_ref()?;
         let keysym = state.key_get_one_sym(keycode);
 
+        if let Some(sequence) = function_key_sequence(keysym, state) {
+            return Some(sequence);
+        }
+
         let sequence: &[u8] = match keysym {
             xkb::Keysym::Return | xkb::Keysym::KP_Enter => b"\r",
             xkb::Keysym::BackSpace => b"\x7f",
@@ -144,18 +190,6 @@ impl XkbKeyboard {
             xkb::Keysym::Delete => b"\x1b[3~",
             xkb::Keysym::Page_Up => b"\x1b[5~",
             xkb::Keysym::Page_Down => b"\x1b[6~",
-            xkb::Keysym::F1 => b"\x1bOP",
-            xkb::Keysym::F2 => b"\x1bOQ",
-            xkb::Keysym::F3 => b"\x1bOR",
-            xkb::Keysym::F4 => b"\x1bOS",
-            xkb::Keysym::F5 => b"\x1b[15~",
-            xkb::Keysym::F6 => b"\x1b[17~",
-            xkb::Keysym::F7 => b"\x1b[18~",
-            xkb::Keysym::F8 => b"\x1b[19~",
-            xkb::Keysym::F9 => b"\x1b[20~",
-            xkb::Keysym::F10 => b"\x1b[21~",
-            xkb::Keysym::F11 => b"\x1b[23~",
-            xkb::Keysym::F12 => b"\x1b[24~",
             _ => {
                 let text = state.key_get_utf8(keycode);
                 return self.translate_text(keysym, text);
@@ -875,6 +909,40 @@ mod tests {
                 "unexpected function-key sequence for evdev keycode {evdev_keycode}"
             );
         }
+    }
+
+    #[test]
+    fn function_keys_encode_shift_ctrl_alt_and_super_modifiers() {
+        let mut keyboard = keyboard_with_layouts("us");
+        let keymap = keyboard.keymap.as_ref().expect("keymap should be installed");
+        let modifier_mask = |name: &str| {
+            let index = keymap.mod_get_index(name);
+            assert_ne!(index, xkb::MOD_INVALID, "missing {name} modifier");
+            1_u32 << index
+        };
+        let shift = modifier_mask("Shift");
+        let alt = modifier_mask("Mod1");
+        let control = modifier_mask("Control");
+        let super_key = modifier_mask("Mod4");
+
+        let cases = [
+            (shift, b"\x1b[1;2P".as_slice()),
+            (alt, b"\x1b[1;3P".as_slice()),
+            (control, b"\x1b[1;5P".as_slice()),
+            (super_key, b"\x1b[1;9P".as_slice()),
+            (shift | alt | control, b"\x1b[1;8P".as_slice()),
+        ];
+
+        for (mask, expected) in cases {
+            keyboard.update_modifiers(mask, 0, 0, 0);
+            assert_eq!(keyboard.translate(59, false).as_deref(), Some(expected));
+        }
+
+        keyboard.update_modifiers(shift | control, 0, 0, 0);
+        assert_eq!(
+            keyboard.translate(63, false).as_deref(),
+            Some(b"\x1b[15;6~".as_slice())
+        );
     }
 
     #[test]
