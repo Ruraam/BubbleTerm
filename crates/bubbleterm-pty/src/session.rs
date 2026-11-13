@@ -91,24 +91,15 @@ impl PtySession {
         self.master.try_clone_reader()
     }
 
-    /// Clone a PTY reader and make the shared master descriptor nonblocking.
+    /// Return the PTY master descriptor for readiness polling.
     ///
-    /// Duplicated PTY descriptors share file status flags, so configuring the
-    /// master before returning the reader makes reads cancellable without
-    /// introducing unsafe descriptor ownership or polling code.
+    /// The descriptor remains owned by portable-pty and is only borrowed by
+    /// the output worker while this session is alive.
     #[cfg(unix)]
-    pub(crate) fn try_clone_nonblocking_reader(&self) -> Result<Box<dyn Read + Send>> {
-        use nix::fcntl::{FcntlArg, OFlag, fcntl};
-
-        let reader = self.master.try_clone_reader()?;
-        let master_fd = self
-            .master
+    pub(crate) fn raw_fd(&self) -> Result<std::os::fd::RawFd> {
+        self.master
             .as_raw_fd()
-            .ok_or_else(|| anyhow::anyhow!("PTY master does not expose a file descriptor"))?;
-        let current_flags = fcntl(master_fd, FcntlArg::F_GETFL)?;
-        let nonblocking_flags = OFlag::from_bits_truncate(current_flags) | OFlag::O_NONBLOCK;
-        fcntl(master_fd, FcntlArg::F_SETFL(nonblocking_flags))?;
-        Ok(reader)
+            .ok_or_else(|| anyhow::anyhow!("PTY master does not expose a file descriptor"))
     }
 
     /// Take the single writer for sending keyboard input to the PTY.
