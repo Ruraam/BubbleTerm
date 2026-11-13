@@ -18,7 +18,6 @@ use xkbcommon::xkb::{self, Context as XkbContext, Keymap, State};
 const MAX_KEYMAP_BYTES: u32 = 1024 * 1024;
 const XKB_EVDEV_OFFSET: u32 = 8;
 
-
 /// Returns the xterm modifier parameter (1 means no modifiers).
 fn xterm_modifier_parameter(state: &xkb::State) -> u8 {
     let mut modifier = 1;
@@ -933,7 +932,10 @@ mod tests {
     #[test]
     fn navigation_keys_encode_shift_ctrl_alt_and_super_modifiers() {
         let mut keyboard = keyboard_with_layouts("us");
-        let keymap = keyboard.keymap.as_ref().expect("keymap should be installed");
+        let keymap = keyboard
+            .keymap
+            .as_ref()
+            .expect("keymap should be installed");
         let modifier_mask = |name: &str| {
             let index = keymap.mod_get_index(name);
             assert_ne!(index, xkb::MOD_INVALID, "missing {name} modifier");
