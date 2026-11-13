@@ -37,6 +37,7 @@ impl Drop for PtyMasterFd {
 pub struct PtySession {
     master: Box<dyn MasterPty + Send>,
     child: Box<dyn Child + Send + Sync>,
+    #[cfg(unix)]
     process_group_terminated: bool,
     child_status: Option<ExitStatus>,
 }
@@ -110,8 +111,13 @@ impl Drop for PtySession {
             // Keep the original conservative path on platforms without the
             // Linux waitid(WNOWAIT) observation used above.
             let child_running = !matches!(self.child.try_wait(), Ok(Some(_)));
+            #[cfg(unix)]
             if child_running {
                 self.terminate_process_group();
+                let _ = self.child.kill();
+            }
+            #[cfg(not(unix))]
+            if child_running {
                 let _ = self.child.kill();
             }
             let _ = self.child.wait();
@@ -151,6 +157,7 @@ impl PtySession {
         Ok(Self {
             master: pair.master,
             child,
+            #[cfg(unix)]
             process_group_terminated: false,
             child_status: None,
         })
