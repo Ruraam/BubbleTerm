@@ -1065,6 +1065,8 @@ mod tests {
         let mut file = tempfile::tempfile().expect("temporary file should be available");
         file.write_all(b"xkb")
             .expect("temporary keymap bytes should be written");
+        file.seek(SeekFrom::Start(0))
+            .expect("temporary keymap file should rewind");
 
         assert!(keyboard.install_keymap(file.into(), 4).is_err());
     }
@@ -1075,6 +1077,8 @@ mod tests {
         let mut file = tempfile::tempfile().expect("temporary file should be available");
         file.write_all(&[0xff])
             .expect("invalid UTF-8 test byte should be written");
+        file.seek(SeekFrom::Start(0))
+            .expect("temporary keymap file should rewind");
 
         assert!(keyboard.install_keymap(file.into(), 1).is_err());
     }
