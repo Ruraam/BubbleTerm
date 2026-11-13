@@ -259,13 +259,36 @@ impl PtySession {
             }
 
             if !self.observe_child_exit(false)? {
-                // The leader may exit between observation and kill(). If the
-                // kill request races with that exit, observe it below and
-                // still terminate the group before allowing the PID to be
-                // reaped.
-                let kill_result = self.child.kill();
-                if kill_result.is_err() && !self.observe_child_exit(false)? {
-                    return kill_result;
+                // Do not use portable-pty's Child::kill here: implementations
+                // may reap the child as part of that call, which would release
+                // the PID before we can safely signal its process group.
+                let pid = self
+                    .child
+                    .process_id()
+                    .and_then(|pid| i32::try_from(pid).ok())
+                    .ok_or_else(|| std::io::Error::other("PTY child has no valid process ID"))?;
+                match nix::sys::signal::kill(
+                    nix::unistd::Pid::from_raw(pid),
+                    nix::sys::signal::Signal::SIGKILL,
+                ) {
+                    Ok(()) | Err(nix::errno::Errno::ESRCH) => {}
+                    Err(nix::errno::Errno::EINTR) => {
+                        nix::sys::signal::kill(
+                            nix::unistd::Pid::from_raw(pid),
+                            nix::sys::signal::Signal::SIGKILL,
+                        )
+                        .or_else(|error| {
+                            if error == nix::errno::Errno::ESRCH {
+                                Ok(())
+                            } else {
+                                Err(error)
+                            }
+                        })
+                        .map_err(|error| std::io::Error::from_raw_os_error(error as i32))?;
+                    }
+                    Err(error) => {
+                        return Err(std::io::Error::from_raw_os_error(error as i32));
+                    }
                 }
             }
 
