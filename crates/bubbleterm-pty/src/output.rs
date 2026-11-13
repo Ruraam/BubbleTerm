@@ -163,6 +163,19 @@ fn read_loop_unix(
         if !read_once(reader, &mut buffer, &sender) {
             break;
         }
+
+        // mio uses edge-triggered readiness on supported Unix backends. The
+        // bounded channel may block the send above while more PTY bytes arrive.
+        // Re-register after each read so data that remained readable during
+        // that backpressure is reported again instead of leaving the worker
+        // asleep waiting for a new readiness edge.
+        if let Err(error) =
+            poll.registry()
+                .reregister(&mut source, Token(0), Interest::READABLE)
+        {
+            let _ = sender.send(PtyOutputEvent::Error(error.to_string()));
+            break;
+        }
     }
 }
 
