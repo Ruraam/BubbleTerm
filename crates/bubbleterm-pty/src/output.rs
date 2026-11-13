@@ -7,6 +7,7 @@
 use std::{
     io::{self, Read},
     sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TryRecvError},
+    sync::{Arc, atomic::{AtomicBool, Ordering}},
     thread::{self, JoinHandle},
     time::Duration,
 };
@@ -35,6 +36,7 @@ pub struct PtyOutputReader {
     receiver: Option<Receiver<PtyOutputEvent>>,
     // Joined during Drop after the owning PtySession has terminated its child.
     worker: Option<JoinHandle<()>>,
+    cancellation: Arc<AtomicBool>,
 }
 
 impl Drop for PtyOutputReader {
@@ -43,6 +45,7 @@ impl Drop for PtyOutputReader {
         // channel wakes up. WindowState drops its PtySession before this
         // reader, which kills/reaps the child and unblocks a pending PTY read.
         self.receiver.take();
+        self.cancellation.store(true, Ordering::Release);
         if let Some(worker) = self.worker.take() {
             let _ = worker.join();
         }
@@ -52,18 +55,36 @@ impl Drop for PtyOutputReader {
 impl PtyOutputReader {
     /// Start a dedicated reader thread for an existing PTY session.
     pub fn spawn(session: &PtySession) -> Result<Self> {
-        let mut reader = session
-            .try_clone_reader()
-            .context("could not clone the PTY output reader")?;
         let (sender, receiver) = mpsc::sync_channel(16);
-        let worker = thread::Builder::new()
-            .name("bubbleterm-pty-output".to_owned())
-            .spawn(move || read_loop(&mut reader, sender))
-            .context("could not start the PTY output worker")?;
+        let cancellation = Arc::new(AtomicBool::new(false));
+        let worker_cancellation = Arc::clone(&cancellation);
+
+        #[cfg(unix)]
+        let worker = {
+            let (mut reader, poll_fd) = session
+                .try_clone_reader_with_poll_fd()
+                .context("could not clone the PTY output reader")?;
+            thread::Builder::new()
+                .name("bubbleterm-pty-output".to_owned())
+                .spawn(move || read_loop_unix(&mut reader, sender, poll_fd, worker_cancellation))
+                .context("could not start the PTY output worker")?
+        };
+
+        #[cfg(not(unix))]
+        let worker = {
+            let mut reader = session
+                .try_clone_reader()
+                .context("could not clone the PTY output reader")?;
+            thread::Builder::new()
+                .name("bubbleterm-pty-output".to_owned())
+                .spawn(move || read_loop(&mut reader, sender, worker_cancellation))
+                .context("could not start the PTY output worker")?
+        };
 
         Ok(Self {
             receiver: Some(receiver),
             worker: Some(worker),
+            cancellation,
         })
     }
 
@@ -87,10 +108,79 @@ impl PtyOutputReader {
     }
 }
 
-fn read_loop(reader: &mut dyn Read, sender: SyncSender<PtyOutputEvent>) {
+#[cfg(unix)]
+fn read_loop_unix(
+    reader: &mut dyn Read,
+    sender: SyncSender<PtyOutputEvent>,
+    poll_fd: std::os::fd::OwnedFd,
+    cancellation: Arc<AtomicBool>,
+) {
+    use std::os::fd::AsRawFd;
+
+    let mut buffer = [0_u8; 16 * 1024];
+    let mut descriptor = libc::pollfd {
+        fd: poll_fd.as_raw_fd(),
+        events: libc::POLLIN | libc::POLLHUP | libc::POLLERR,
+        revents: 0,
+    };
+
+    loop {
+        if cancellation.load(Ordering::Acquire) {
+            break;
+        }
+        descriptor.revents = 0;
+        let ready = unsafe { libc::poll(&mut descriptor, 1, 100) };
+        if ready == 0 {
+            continue;
+        }
+        if ready < 0 {
+            let error = io::Error::last_os_error();
+            if error.kind() == io::ErrorKind::Interrupted {
+                continue;
+            }
+            let _ = sender.send(PtyOutputEvent::Error(error.to_string()));
+            break;
+        }
+        if cancellation.load(Ordering::Acquire) {
+            break;
+        }
+
+        match reader.read(&mut buffer) {
+            Ok(0) => {
+                let _ = sender.send(PtyOutputEvent::Closed);
+                break;
+            }
+            Ok(count) => {
+                if sender.send(PtyOutputEvent::Data(buffer[..count].to_vec())).is_err() {
+                    break;
+                }
+            }
+            Err(error) if is_normal_pty_close(&error) => {
+                let _ = sender.send(PtyOutputEvent::Closed);
+                break;
+            }
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => continue,
+            Err(error) => {
+                let _ = sender.send(PtyOutputEvent::Error(error.to_string()));
+                break;
+            }
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn read_loop(
+    reader: &mut dyn Read,
+    sender: SyncSender<PtyOutputEvent>,
+    cancellation: Arc<AtomicBool>,
+) {
     let mut buffer = [0_u8; 16 * 1024];
 
     loop {
+        if cancellation.load(Ordering::Acquire) {
+            break;
+        }
         match reader.read(&mut buffer) {
             Ok(0) => {
                 let _ = sender.send(PtyOutputEvent::Closed);
@@ -200,6 +290,39 @@ mod tests {
                 .any(|window| window == b"before-exit")
         );
         drop(output);
+    }
+
+    #[test]
+    fn dropping_reader_unblocks_worker_when_child_is_silent() {
+        let spec = LaunchSpec {
+            shell: "/bin/sh".into(),
+            args: vec!["-c".into(), "exec sleep 30".into()],
+            working_directory: None,
+            environment: Default::default(),
+            kind: ShellKind::Host,
+        };
+        let session = PtySession::spawn(
+            &spec,
+            PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            },
+        )
+        .expect("PTY should spawn");
+        let output = PtyOutputReader::spawn(&session).expect("output reader should start");
+
+        let started = std::time::Instant::now();
+        drop(output);
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "dropping a silent reader should not wait for child output"
+        );
+        assert!(
+            session.try_wait().expect("child status should be readable").is_none(),
+            "dropping reader must not terminate child"
+        );
     }
 
     #[test]
