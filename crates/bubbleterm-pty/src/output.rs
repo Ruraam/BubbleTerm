@@ -1173,4 +1173,5 @@ mod tests {
 
         drop(session);
         let _ = fs::remove_file(pid_file);
-    }}
+    }
+}
