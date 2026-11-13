@@ -569,10 +569,7 @@ mod tests {
 
         let spec = LaunchSpec {
             shell: "/bin/sh".into(),
-            args: vec![
-                "-c".into(),
-                "head -c 8192 /dev/zero | tr '\\000' x".into(),
-            ],
+            args: vec!["-c".into(), "head -c 8192 /dev/zero | tr '\\000' x".into()],
             working_directory: None,
             environment: Default::default(),
             kind: ShellKind::Host,
@@ -613,7 +610,10 @@ mod tests {
         let mut closed_events = 0;
         loop {
             let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-            assert!(!remaining.is_zero(), "PTY output did not reach terminal closure");
+            assert!(
+                !remaining.is_zero(),
+                "PTY output did not reach terminal closure"
+            );
             match output
                 .recv_timeout(remaining)
                 .expect("PTY output event timed out")
@@ -636,9 +636,15 @@ mod tests {
             received.iter().all(|byte| *byte == b'x'),
             "queued output bytes must retain their contents and order"
         );
-        assert_eq!(closed_events, 1, "PTY closure must be reported exactly once");
+        assert_eq!(
+            closed_events, 1,
+            "PTY closure must be reported exactly once"
+        );
         assert!(
-            matches!(output.try_recv(), Err(std::sync::mpsc::TryRecvError::Disconnected)),
+            matches!(
+                output.try_recv(),
+                Err(std::sync::mpsc::TryRecvError::Disconnected)
+            ),
             "no duplicate or trailing events may follow Closed"
         );
         drop(output);
