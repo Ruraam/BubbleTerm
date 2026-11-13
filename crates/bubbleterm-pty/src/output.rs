@@ -163,6 +163,53 @@ mod tests {
     }
 
     #[test]
+    fn reports_closed_after_child_exits() {
+        let spec = LaunchSpec {
+            shell: "/bin/sh".into(),
+            args: vec!["-c".into(), "printf 'before-exit\\n'; exit 0".into()],
+            working_directory: None,
+            environment: Default::default(),
+            kind: ShellKind::Host,
+        };
+        let session = PtySession::spawn(&spec, PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
+            .expect("PTY should spawn");
+        let output = PtyOutputReader::spawn(&session).expect("output reader should start");
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        let mut bytes = Vec::new();
+        let mut closed = false;
+        while !closed {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            assert!(!remaining.is_zero(), "PTY reader did not report closure");
+            match output.recv_timeout(remaining).expect("PTY event timed out") {
+                PtyOutputEvent::Data(chunk) => bytes.extend_from_slice(&chunk),
+                PtyOutputEvent::Closed => closed = true,
+                PtyOutputEvent::Error(error) => panic!("PTY reader failed: {error}"),
+            }
+        }
+        assert!(bytes.windows(b"before-exit".len()).any(|window| window == b"before-exit"));
+        drop(output);
+    }
+
+    #[test]
+    fn dropping_reader_unblocks_worker_when_output_channel_is_full() {
+        let spec = LaunchSpec {
+            shell: "/bin/sh".into(),
+            args: vec!["-c".into(), "exec yes bubbleterm".into()],
+            working_directory: None,
+            environment: Default::default(),
+            kind: ShellKind::Host,
+        };
+        let mut session = PtySession::spawn(&spec, PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
+            .expect("PTY should spawn");
+        let output = PtyOutputReader::spawn(&session).expect("output reader should start");
+        std::thread::sleep(Duration::from_millis(150));
+        let started = std::time::Instant::now();
+        drop(output);
+        assert!(started.elapsed() < Duration::from_secs(2), "dropping receiver should unblock the output worker");
+        assert!(session.try_wait().expect("child status should be readable").is_none(), "dropping reader must not terminate child");
+        drop(session);
+    }
+    #[test]
     fn receives_child_output_off_the_caller_thread() {
         let spec = LaunchSpec {
             shell: "/bin/sh".into(),
