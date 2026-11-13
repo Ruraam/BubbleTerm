@@ -21,7 +21,12 @@ const XKB_EVDEV_OFFSET: u32 = 8;
 
 /// Returns the xterm modifier parameter (1 means no modifiers).
 fn xterm_modifier_parameter(state: &xkb::State) -> u8 {
-    let modifier = xterm_modifier_parameter(state);
+    let mut modifier = 1;
+    for (name, value) in [("Shift", 1), ("Mod1", 2), ("Control", 4), ("Mod4", 8)] {
+        if state.mod_name_is_active(name, xkb::STATE_MODS_EFFECTIVE) {
+            modifier += value;
+        }
+    }
     modifier
 }
 
