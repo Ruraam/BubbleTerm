@@ -241,7 +241,7 @@ mod tests {
             environment: Default::default(),
             kind: ShellKind::Host,
         };
-        let session = PtySession::spawn(
+        let mut session = PtySession::spawn(
             &spec,
             PtySize {
                 rows: 24,
