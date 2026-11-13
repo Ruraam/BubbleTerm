@@ -730,7 +730,6 @@ mod tests {
         assert!(!supports_xkb_keymap(WEnum::Unknown(2)));
     }
 
-
     #[test]
     fn focus_loss_clears_repeat_and_refocus_does_not_resume_a_stale_key() {
         let now = Instant::now();
@@ -748,10 +747,7 @@ mod tests {
 
         assert_eq!(repeat.take_due(now + Duration::from_secs(2)), None);
         repeat.press(31, true, now + Duration::from_secs(2));
-        assert_eq!(
-            repeat.take_due(now + Duration::from_millis(2_399)),
-            None
-        );
+        assert_eq!(repeat.take_due(now + Duration::from_millis(2_399)), None);
         assert_eq!(
             repeat.take_due(now + Duration::from_millis(2_400)),
             Some(31)
@@ -794,10 +790,7 @@ mod tests {
 
         assert_eq!(repeat.take_due(now + Duration::from_secs(1)), None);
         repeat.press(22, true, now + Duration::from_secs(1));
-        assert_eq!(
-            repeat.take_due(now + Duration::from_millis(1_249)),
-            None
-        );
+        assert_eq!(repeat.take_due(now + Duration::from_millis(1_249)), None);
         assert_eq!(
             repeat.take_due(now + Duration::from_millis(1_250)),
             Some(22)
