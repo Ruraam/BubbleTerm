@@ -253,7 +253,7 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn dropping_session_terminates_background_process_group_members() {
+    fn dropping_session_kills_background_processes_that_ignore_sighup() {
         use std::{
             fs, thread,
             time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -271,7 +271,7 @@ mod tests {
             shell: "/bin/sh".into(),
             args: vec![
                 "-c".into(),
-                "sleep 30 & child=$!; printf '%s\\n' \"$child\" > \"$BUBBLETERM_TEST_CHILD_PID_FILE\"; wait".into(),
+                "trap '' HUP; sleep 30 & child=$!; printf '%s\\n' \"$child\" > \"$BUBBLETERM_TEST_CHILD_PID_FILE\"; wait".into(),
             ],
             working_directory: None,
             environment: [(
@@ -338,6 +338,32 @@ mod tests {
         let _ = fs::remove_file(pid_file);
     }
 
+    #[test]
+    fn try_wait_reports_a_naturally_exited_child() {
+        use std::time::{Duration, Instant};
+
+        let spec = LaunchSpec {
+            shell: "/bin/sh".into(),
+            args: vec!["-c".into(), "exit 23".into()],
+            working_directory: None,
+            environment: Default::default(),
+            kind: ShellKind::Host,
+        };
+        let mut session = PtySession::spawn(
+            &spec,
+            PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 },
+        ).expect("PTY child should spawn");
+
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let status = loop {
+            if let Some(status) = session.try_wait().expect("try_wait should succeed") {
+                break status;
+            }
+            assert!(Instant::now() < deadline, "child did not exit naturally");
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        assert_eq!(status.exit_code(), 23);
+    }
     #[test]
     fn resize_rejects_zero_cell_dimensions() {
         let spec = LaunchSpec {
