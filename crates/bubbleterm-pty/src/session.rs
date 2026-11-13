@@ -109,7 +109,11 @@ impl PtySession {
             .ok_or_else(|| anyhow::anyhow!("PTY master does not expose a file descriptor"))?;
         // SAFETY: dup returns a new owned descriptor on success.
         let poll_fd = unsafe { libc::dup(master_fd) };
-        anyhow::ensure!(poll_fd >= 0, "could not duplicate PTY descriptor: {}", std::io::Error::last_os_error());
+        anyhow::ensure!(
+            poll_fd >= 0,
+            "could not duplicate PTY descriptor: {}",
+            std::io::Error::last_os_error()
+        );
         // SAFETY: ownership of the newly duplicated descriptor is transferred here.
         let poll_fd = unsafe { OwnedFd::from_raw_fd(poll_fd) };
         Ok((reader, poll_fd))
