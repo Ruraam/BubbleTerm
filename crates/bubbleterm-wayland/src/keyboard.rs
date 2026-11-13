@@ -854,18 +854,18 @@ mod tests {
     fn function_keys_emit_expected_xterm_sequences() {
         let mut keyboard = keyboard_with_layouts("us");
         let cases: &[(u32, &[u8])] = &[
-            (59, b"\x1bOP"),    // F1
-            (60, b"\x1bOQ"),    // F2
-            (61, b"\x1bOR"),    // F3
-            (62, b"\x1bOS"),    // F4
-            (63, b"\x1b[15~"),  // F5
-            (64, b"\x1b[17~"),  // F6
-            (65, b"\x1b[18~"),  // F7
-            (66, b"\x1b[19~"),  // F8
-            (67, b"\x1b[20~"),  // F9
-            (68, b"\x1b[21~"),  // F10
-            (87, b"\x1b[23~"),  // F11
-            (88, b"\x1b[24~"),  // F12
+            (59, b"\x1bOP"),   // F1
+            (60, b"\x1bOQ"),   // F2
+            (61, b"\x1bOR"),   // F3
+            (62, b"\x1bOS"),   // F4
+            (63, b"\x1b[15~"), // F5
+            (64, b"\x1b[17~"), // F6
+            (65, b"\x1b[18~"), // F7
+            (66, b"\x1b[19~"), // F8
+            (67, b"\x1b[20~"), // F9
+            (68, b"\x1b[21~"), // F10
+            (87, b"\x1b[23~"), // F11
+            (88, b"\x1b[24~"), // F12
         ];
 
         for (evdev_keycode, expected) in cases {
