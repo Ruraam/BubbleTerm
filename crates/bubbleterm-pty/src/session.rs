@@ -73,23 +73,44 @@ impl PtySession {
 
 impl PtySession {
     #[cfg(unix)]
-    fn terminate_process_group(&mut self) {
+    fn signal_process_group(
+        process_group: nix::unistd::Pid,
+        signal: nix::sys::signal::Signal,
+    ) -> std::io::Result<()> {
+        loop {
+            match nix::sys::signal::kill(process_group, signal) {
+                Ok(()) | Err(nix::errno::Errno::ESRCH) => return Ok(()),
+                Err(nix::errno::Errno::EINTR) => continue,
+                Err(error) => {
+                    return Err(std::io::Error::from_raw_os_error(error as i32));
+                }
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    fn terminate_process_group(&mut self) -> std::io::Result<()> {
         if self.process_group_terminated {
-            return;
+            return Ok(());
         }
 
-        if let Some(pid) = self
+        let pid = self
             .child
             .process_id()
             .and_then(|pid| i32::try_from(pid).ok())
-        {
-            let process_group = nix::unistd::Pid::from_raw(-pid);
-            let _ = nix::sys::signal::kill(process_group, nix::sys::signal::Signal::SIGHUP);
+            .ok_or_else(|| std::io::Error::other("PTY child has no valid process ID"))?;
+        let process_group = nix::unistd::Pid::from_raw(-pid);
+
+        // SIGHUP is best-effort; SIGKILL is still attempted if it fails.
+        if Self::signal_process_group(process_group, nix::sys::signal::Signal::SIGHUP).is_ok() {
             std::thread::sleep(std::time::Duration::from_millis(50));
-            let _ = nix::sys::signal::kill(process_group, nix::sys::signal::Signal::SIGKILL);
         }
 
+        // Only mark the group terminated after SIGKILL succeeds or the group
+        // is already gone (ESRCH). Other errors must remain observable.
+        Self::signal_process_group(process_group, nix::sys::signal::Signal::SIGKILL)?;
         self.process_group_terminated = true;
+        Ok(())
     }
 }
 
@@ -101,7 +122,7 @@ impl Drop for PtySession {
             // while the process group is signaled. Never signal the numeric
             // PGID if observation failed: it may no longer identify our child.
             if self.child_status.is_none() && self.observe_child_exit(false).is_ok() {
-                self.terminate_process_group();
+                let _ = self.terminate_process_group();
             }
             let _ = self.child.wait();
         }
@@ -113,7 +134,7 @@ impl Drop for PtySession {
             let child_running = !matches!(self.child.try_wait(), Ok(Some(_)));
             #[cfg(unix)]
             if child_running {
-                self.terminate_process_group();
+                let _ = self.terminate_process_group();
                 let _ = self.child.kill();
             }
             #[cfg(not(unix))]
@@ -220,7 +241,7 @@ impl PtySession {
             }
             // The leader is still unreaped here, so its PID cannot have been
             // recycled before we signal the inherited process group.
-            self.terminate_process_group();
+            self.terminate_process_group()?;
         }
 
         let status = self.child.try_wait()?;
@@ -239,7 +260,7 @@ impl PtySession {
         #[cfg(target_os = "linux")]
         {
             self.observe_child_exit(true)?;
-            self.terminate_process_group();
+            self.terminate_process_group()?;
         }
 
         let status = self.child.wait()?;
@@ -293,7 +314,7 @@ impl PtySession {
             }
 
             self.observe_child_exit(true)?;
-            self.terminate_process_group();
+            self.terminate_process_group()?;
             Ok(())
         }
 
