@@ -422,4 +422,37 @@ mod tests {
             "a terminal read failure must end the worker without duplicate events"
         );
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn reports_eio_as_normal_pty_closure() {
+        use std::{
+            io,
+            sync::{Arc, atomic::AtomicBool, mpsc},
+        };
+
+        struct ClosedPtyReader;
+
+        impl io::Read for ClosedPtyReader {
+            fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+                Err(io::Error::from_raw_os_error(nix::errno::Errno::EIO as i32))
+            }
+        }
+
+        let (sender, receiver) = mpsc::sync_channel(2);
+        super::read_loop_unix(
+            &mut ClosedPtyReader,
+            sender,
+            Arc::new(AtomicBool::new(false)),
+        );
+
+        assert_eq!(
+            receiver.recv().expect("reader should report PTY closure"),
+            PtyOutputEvent::Closed
+        );
+        assert!(
+            receiver.try_recv().is_err(),
+            "normal PTY closure must not emit duplicate events"
+        );
+    }
 }
