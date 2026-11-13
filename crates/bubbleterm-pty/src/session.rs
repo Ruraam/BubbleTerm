@@ -351,8 +351,14 @@ mod tests {
         };
         let mut session = PtySession::spawn(
             &spec,
-            PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 },
-        ).expect("PTY child should spawn");
+            PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            },
+        )
+        .expect("PTY child should spawn");
 
         let deadline = Instant::now() + Duration::from_secs(3);
         let status = loop {
