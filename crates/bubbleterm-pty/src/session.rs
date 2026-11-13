@@ -18,6 +18,17 @@ pub struct PtySession {
     child: Box<dyn Child + Send + Sync>,
 }
 
+impl Drop for PtySession {
+    fn drop(&mut self) {
+        // Closing a window or unwinding after a Wayland error must not leave
+        // the interactive shell running without its terminal frontend.
+        // kill() may fail when the child has already exited; wait() still
+        // reaps it and prevents a zombie process.
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
 impl PtySession {
     /// Allocate a PTY and spawn the requested Host or Bubble command.
     ///
