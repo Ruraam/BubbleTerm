@@ -204,7 +204,6 @@ impl XkbKeyboard {
             xkb::Keysym::BackSpace => b"\x7f",
             xkb::Keysym::Tab => b"\t",
             xkb::Keysym::Escape => b"\x1b",
-            }
             _ => {
                 let text = state.key_get_utf8(keycode);
                 return self.translate_text(keysym, text);
