@@ -372,17 +372,20 @@ struct KeyboardLifecycle {
     focused: bool,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct SeatGlobal {
     name: u32,
     version: u32,
 }
 
+#[cfg(test)]
 #[derive(Debug, Default, PartialEq, Eq)]
 struct SeatRegistry {
     seats: Vec<SeatGlobal>,
 }
 
+#[cfg(test)]
 impl SeatRegistry {
     /// Records a seat global unless its registry name is already present.
     fn register(&mut self, name: u32, version: u32) -> bool {
