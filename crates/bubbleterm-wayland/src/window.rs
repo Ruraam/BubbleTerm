@@ -635,7 +635,7 @@ impl Dispatch<xdg_toplevel::XdgToplevel, ()> for WindowState {
 mod tests {
     use super::{
         CapabilityChange, KeyboardLifecycle, checked_buffer_layout, has_keyboard_capability,
-        supports_xkb_keymap,
+        is_active_proxy, supports_xkb_keymap,
     };
     use crate::keyboard::KeyRepeat;
     use std::time::{Duration, Instant};
