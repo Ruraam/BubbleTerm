@@ -16,6 +16,7 @@ use anyhow::{Context, Result, ensure};
 use xkbcommon::xkb::{self, Context as XkbContext, Keymap, State};
 
 const MAX_KEYMAP_BYTES: u32 = 1024 * 1024;
+const MAX_KEY_REPEAT_RATE: u32 = 1_000;
 const XKB_EVDEV_OFFSET: u32 = 8;
 
 /// Returns the xterm modifier parameter (1 means no modifiers).
@@ -300,7 +301,11 @@ impl KeyRepeat {
     /// Updates the compositor-provided repeat rate and initial delay.
     /// A zero rate disables repeat; invalid negative values are treated as disabled.
     pub fn configure(&mut self, rate: i32, delay_ms: i32, now: Instant) {
-        self.rate = u32::try_from(rate).unwrap_or(0);
+        // Treat malformed compositor values as disabled or cap extreme rates.
+        // This prevents a zero-length repeat interval and a busy event loop.
+        self.rate = u32::try_from(rate)
+            .unwrap_or(0)
+            .min(MAX_KEY_REPEAT_RATE);
         self.delay = Duration::from_millis(u64::try_from(delay_ms).unwrap_or(0));
         self.next_at = if self.rate > 0 && self.active_key.is_some() {
             Some(now + self.delay)
@@ -813,6 +818,24 @@ mod tests {
         // Re-enabling repeat must not resurrect the key cleared by disable.
         repeat.configure(20, 300, start + Duration::from_secs(1));
         assert_eq!(repeat.take_due(start + Duration::from_secs(2)), None);
+    }
+
+    #[test]
+    fn excessive_repeat_rate_is_capped_to_a_safe_interval() {
+        let start = Instant::now();
+        let mut repeat = KeyRepeat::default();
+        repeat.configure(i32::MAX, 0, start);
+        repeat.press(30, true, start);
+
+        assert_eq!(repeat.take_due(start), Some(30));
+        assert_eq!(
+            repeat.take_due(start + Duration::from_micros(999)),
+            None
+        );
+        assert_eq!(
+            repeat.take_due(start + Duration::from_millis(1)),
+            Some(30)
+        );
     }
 
     #[test]
