@@ -990,6 +990,52 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn retries_interrupted_and_would_block_reads_without_closing_the_stream() {
+        use std::io::{self, Read};
+
+        struct TransientReader {
+            step: usize,
+        }
+
+        impl Read for TransientReader {
+            fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+                self.step += 1;
+                match self.step {
+                    1 => Err(io::Error::from(io::ErrorKind::Interrupted)),
+                    2 => Err(io::Error::from(io::ErrorKind::WouldBlock)),
+                    3 => {
+                        let payload = b"recovered-after-transient-errors";
+                        buffer[..payload.len()].copy_from_slice(payload);
+                        Ok(payload.len())
+                    }
+                    _ => Ok(0),
+                }
+            }
+        }
+
+        let (sender, receiver) = std::sync::mpsc::sync_channel(4);
+        super::read_loop_unix_unpolled(
+            &mut TransientReader { step: 0 },
+            sender,
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        );
+
+        assert_eq!(
+            receiver.recv().expect("recovered data should be delivered"),
+            PtyOutputEvent::Data(b"recovered-after-transient-errors".to_vec())
+        );
+        assert_eq!(
+            receiver.recv().expect("normal EOF should close the stream"),
+            PtyOutputEvent::Closed
+        );
+        assert!(
+            receiver.try_recv().is_err(),
+            "transient read errors must not produce Error or duplicate Closed events"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn reports_non_terminal_read_errors_once() {
         use std::{
             io,
