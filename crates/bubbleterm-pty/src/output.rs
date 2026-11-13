@@ -171,8 +171,16 @@ mod tests {
             environment: Default::default(),
             kind: ShellKind::Host,
         };
-        let session = PtySession::spawn(&spec, PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
-            .expect("PTY should spawn");
+        let session = PtySession::spawn(
+            &spec,
+            PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            },
+        )
+        .expect("PTY should spawn");
         let output = PtyOutputReader::spawn(&session).expect("output reader should start");
         let deadline = std::time::Instant::now() + Duration::from_secs(3);
         let mut bytes = Vec::new();
@@ -186,7 +194,11 @@ mod tests {
                 PtyOutputEvent::Error(error) => panic!("PTY reader failed: {error}"),
             }
         }
-        assert!(bytes.windows(b"before-exit".len()).any(|window| window == b"before-exit"));
+        assert!(
+            bytes
+                .windows(b"before-exit".len())
+                .any(|window| window == b"before-exit")
+        );
         drop(output);
     }
 
@@ -199,14 +211,31 @@ mod tests {
             environment: Default::default(),
             kind: ShellKind::Host,
         };
-        let mut session = PtySession::spawn(&spec, PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
-            .expect("PTY should spawn");
+        let mut session = PtySession::spawn(
+            &spec,
+            PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            },
+        )
+        .expect("PTY should spawn");
         let output = PtyOutputReader::spawn(&session).expect("output reader should start");
         std::thread::sleep(Duration::from_millis(150));
         let started = std::time::Instant::now();
         drop(output);
-        assert!(started.elapsed() < Duration::from_secs(2), "dropping receiver should unblock the output worker");
-        assert!(session.try_wait().expect("child status should be readable").is_none(), "dropping reader must not terminate child");
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "dropping receiver should unblock the output worker"
+        );
+        assert!(
+            session
+                .try_wait()
+                .expect("child status should be readable")
+                .is_none(),
+            "dropping reader must not terminate child"
+        );
         drop(session);
     }
     #[test]
