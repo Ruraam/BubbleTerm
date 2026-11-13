@@ -448,6 +448,64 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn receives_large_contiguous_output_without_losing_bytes() {
+        const EXPECTED_BYTES: usize = 1024 * 1024;
+
+        let spec = LaunchSpec {
+            shell: "/bin/sh".into(),
+            args: vec![
+                "-c".into(),
+                "dd if=/dev/zero bs=4096 count=256 2>/dev/null | tr '\\000' x".into(),
+            ],
+            working_directory: None,
+            environment: Default::default(),
+            kind: ShellKind::Host,
+        };
+        let session = PtySession::spawn(
+            &spec,
+            PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            },
+        )
+        .expect("PTY should spawn");
+        let output = PtyOutputReader::spawn(&session).expect("output reader should start");
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        let mut received = Vec::with_capacity(EXPECTED_BYTES);
+        loop {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            assert!(
+                !remaining.is_zero(),
+                "large PTY output timed out after receiving {} of {EXPECTED_BYTES} bytes",
+                received.len()
+            );
+            match output
+                .recv_timeout(remaining)
+                .expect("large PTY output event timed out")
+            {
+                PtyOutputEvent::Data(chunk) => received.extend_from_slice(&chunk),
+                PtyOutputEvent::Closed => break,
+                PtyOutputEvent::Error(error) => panic!("PTY reader failed: {error}"),
+            }
+        }
+
+        assert_eq!(
+            received.len(),
+            EXPECTED_BYTES,
+            "the PTY output stream must deliver every byte before closure"
+        );
+        assert!(
+            received.iter().all(|byte| *byte == b'x'),
+            "the PTY output stream must preserve byte contents and order"
+        );
+        drop(output);
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn output_reader_preserves_blocking_mode_for_large_pty_writes() {
         use nix::fcntl::{FcntlArg, OFlag, fcntl};
         use std::io::Write;
