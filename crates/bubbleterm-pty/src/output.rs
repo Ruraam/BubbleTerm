@@ -704,7 +704,15 @@ mod tests {
                     "PTY closure timed out on iteration {iteration}"
                 );
                 match output.recv_timeout(remaining).expect("PTY event timed out") {
-                    PtyOutputEvent::Data(chunk) => received.extend_from_slice(&chunk),
+                    PtyOutputEvent::Data(chunk) => {
+                        received.extend_from_slice(&chunk);
+                        if !stream_ready_sent && received.len() >= 16 * 1024 {
+                            stream_ready_sender
+                                .send(())
+                                .expect("test should still be waiting for the output threshold");
+                            stream_ready_sent = true;
+                        }
+                    },
                     PtyOutputEvent::Closed => {
                         closed_events += 1;
                         break;
@@ -1151,9 +1159,11 @@ mod tests {
         .expect("PTY flood process should spawn");
         let output = PtyOutputReader::spawn(&session).expect("output reader should start");
 
+        let (stream_ready_sender, stream_ready_receiver) = std::sync::mpsc::channel();
         let consumer = std::thread::spawn(move || {
             let deadline = Instant::now() + DEADLINE;
             let mut received = Vec::new();
+            let mut stream_ready_sent = false;
             loop {
                 let remaining = deadline.saturating_duration_since(Instant::now());
                 assert!(
@@ -1193,10 +1203,15 @@ mod tests {
             std::thread::sleep(Duration::from_millis(5));
         };
 
+        // Wait until the reader has actually consumed a substantial stream;
+        // a fixed sleep is unreliable on slower or heavily loaded CI runners.
+        stream_ready_receiver
+            .recv_timeout(Duration::from_secs(3))
+            .expect("PTY reader should consume a substantial stream before SIGHUP");
+
         // Signal only the shell, not its short-lived sleep child. PtySession
         // teardown intentionally signals the whole process group and would
         // race the shell's trap against termination of that child.
-        std::thread::sleep(Duration::from_millis(50));
         nix::sys::signal::kill(
             nix::unistd::Pid::from_raw(child_pid),
             nix::sys::signal::Signal::SIGHUP,
