@@ -689,8 +689,8 @@ impl Dispatch<xdg_toplevel::XdgToplevel, ()> for WindowState {
 mod tests {
     use super::{
         CapabilityChange, KeyboardLifecycle, SeatGlobal, SeatRegistry,
-        accepts_keyboard_proxy_event, checked_buffer_layout,
-        has_keyboard_capability, supports_xkb_keymap,
+        accepts_keyboard_proxy_event, checked_buffer_layout, has_keyboard_capability,
+        supports_xkb_keymap,
     };
     use crate::keyboard::KeyRepeat;
     use std::time::{Duration, Instant};
@@ -704,7 +704,10 @@ mod tests {
         assert!(registry.register(7, 9));
         assert_eq!(
             registry.preferred(),
-            Some(SeatGlobal { name: 7, version: 9 })
+            Some(SeatGlobal {
+                name: 7,
+                version: 9
+            })
         );
     }
 
@@ -717,7 +720,10 @@ mod tests {
 
         assert_eq!(
             registry.seats,
-            vec![SeatGlobal { name: 7, version: 9 }]
+            vec![SeatGlobal {
+                name: 7,
+                version: 9
+            }]
         );
     }
 
@@ -731,7 +737,10 @@ mod tests {
         assert!(!registry.remove(99));
         assert_eq!(
             registry.preferred(),
-            Some(SeatGlobal { name: 7, version: 9 })
+            Some(SeatGlobal {
+                name: 7,
+                version: 9
+            })
         );
         assert_eq!(registry.seats.len(), 2);
     }
@@ -756,7 +765,10 @@ mod tests {
         assert!(registry.remove(7));
         assert_eq!(
             registry.preferred(),
-            Some(SeatGlobal { name: 12, version: 8 })
+            Some(SeatGlobal {
+                name: 12,
+                version: 8
+            })
         );
     }
 
