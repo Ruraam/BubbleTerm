@@ -18,6 +18,52 @@ use xkbcommon::xkb::{self, Context as XkbContext, Keymap, State};
 const MAX_KEYMAP_BYTES: u32 = 1024 * 1024;
 const XKB_EVDEV_OFFSET: u32 = 8;
 
+
+/// Returns the xterm modifier parameter (1 means no modifiers).
+fn xterm_modifier_parameter(state: &xkb::State) -> u8 {
+    let modifier = xterm_modifier_parameter(state);
+    modifier
+}
+
+/// Builds modifier-aware cursor and navigation key sequences.
+fn navigation_key_sequence(
+    keysym: xkb::Keysym,
+    state: &xkb::State,
+    application_cursor: bool,
+) -> Option<Vec<u8>> {
+    let modifier = xterm_modifier_parameter(state);
+    let (number, final_byte, tilde_form) = match keysym {
+        xkb::Keysym::Up => (1, b'A', false),
+        xkb::Keysym::Down => (1, b'B', false),
+        xkb::Keysym::Right => (1, b'C', false),
+        xkb::Keysym::Left => (1, b'D', false),
+        xkb::Keysym::Home => (1, b'H', false),
+        xkb::Keysym::End => (1, b'F', false),
+        xkb::Keysym::Insert => (2, 0, true),
+        xkb::Keysym::Delete => (3, 0, true),
+        xkb::Keysym::Page_Up => (5, 0, true),
+        xkb::Keysym::Page_Down => (6, 0, true),
+        _ => return None,
+    };
+
+    if modifier == 1 {
+        return Some(match keysym {
+            xkb::Keysym::Up if application_cursor => b"\x1bOA".to_vec(),
+            xkb::Keysym::Down if application_cursor => b"\x1bOB".to_vec(),
+            xkb::Keysym::Right if application_cursor => b"\x1bOC".to_vec(),
+            xkb::Keysym::Left if application_cursor => b"\x1bOD".to_vec(),
+            _ if tilde_form => format!("\x1b[{number}~").into_bytes(),
+            _ => vec![0x1b, b'[', final_byte],
+        });
+    }
+
+    Some(if tilde_form {
+        format!("\x1b[{number};{modifier}~").into_bytes()
+    } else {
+        format!("\x1b[1;{modifier}{}", final_byte as char).into_bytes()
+    })
+}
+
 /// Builds xterm-compatible function-key sequences, including modifier parameters.
 fn function_key_sequence(keysym: xkb::Keysym, state: &xkb::State) -> Option<Vec<u8>> {
     let (number, final_byte, tilde_form) = match keysym {
@@ -145,6 +191,10 @@ impl XkbKeyboard {
         let state = self.state.as_ref()?;
         let keysym = state.key_get_one_sym(keycode);
 
+        if let Some(sequence) = navigation_key_sequence(keysym, state, application_cursor) {
+            return Some(sequence);
+        }
+
         if let Some(sequence) = function_key_sequence(keysym, state) {
             return Some(sequence);
         }
@@ -154,40 +204,7 @@ impl XkbKeyboard {
             xkb::Keysym::BackSpace => b"\x7f",
             xkb::Keysym::Tab => b"\t",
             xkb::Keysym::Escape => b"\x1b",
-            xkb::Keysym::Up => {
-                if application_cursor {
-                    b"\x1bOA"
-                } else {
-                    b"\x1b[A"
-                }
             }
-            xkb::Keysym::Down => {
-                if application_cursor {
-                    b"\x1bOB"
-                } else {
-                    b"\x1b[B"
-                }
-            }
-            xkb::Keysym::Right => {
-                if application_cursor {
-                    b"\x1bOC"
-                } else {
-                    b"\x1b[C"
-                }
-            }
-            xkb::Keysym::Left => {
-                if application_cursor {
-                    b"\x1bOD"
-                } else {
-                    b"\x1b[D"
-                }
-            }
-            xkb::Keysym::Home => b"\x1b[H",
-            xkb::Keysym::End => b"\x1b[F",
-            xkb::Keysym::Insert => b"\x1b[2~",
-            xkb::Keysym::Delete => b"\x1b[3~",
-            xkb::Keysym::Page_Up => b"\x1b[5~",
-            xkb::Keysym::Page_Down => b"\x1b[6~",
             _ => {
                 let text = state.key_get_utf8(keycode);
                 return self.translate_text(keysym, text);
@@ -907,6 +924,44 @@ mod tests {
                 "unexpected function-key sequence for evdev keycode {evdev_keycode}"
             );
         }
+    }
+
+    #[test]
+    fn navigation_keys_encode_shift_ctrl_alt_and_super_modifiers() {
+        let mut keyboard = keyboard_with_layouts("us");
+        let keymap = keyboard.keymap.as_ref().expect("keymap should be installed");
+        let modifier_mask = |name: &str| {
+            let index = keymap.mod_get_index(name);
+            assert_ne!(index, xkb::MOD_INVALID, "missing {name} modifier");
+            1_u32 << index
+        };
+        let shift = modifier_mask("Shift");
+        let alt = modifier_mask("Mod1");
+        let control = modifier_mask("Control");
+        let super_key = modifier_mask("Mod4");
+
+        let cases = [
+            (shift, b"\x1b[1;2A".as_slice()),
+            (alt, b"\x1b[1;3A".as_slice()),
+            (control, b"\x1b[1;5A".as_slice()),
+            (super_key, b"\x1b[1;9A".as_slice()),
+            (shift | alt | control, b"\x1b[1;8A".as_slice()),
+        ];
+
+        for (mask, expected) in cases {
+            keyboard.update_modifiers(mask, 0, 0, 0);
+            assert_eq!(keyboard.translate(103, false).as_deref(), Some(expected));
+        }
+
+        keyboard.update_modifiers(shift | control, 0, 0, 0);
+        assert_eq!(
+            keyboard.translate(110, false).as_deref(),
+            Some(b"\x1b[2;6~".as_slice())
+        );
+        assert_eq!(
+            keyboard.translate(102, false).as_deref(),
+            Some(b"\x1b[1;6H".as_slice())
+        );
     }
 
     #[test]
