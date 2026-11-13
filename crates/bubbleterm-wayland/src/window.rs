@@ -53,7 +53,7 @@ pub fn run_wayland_window(session: PtySession, cell_metrics: CellMetrics) -> Res
     let wm_base = globals
         .bind::<xdg_wm_base::XdgWmBase, _, _>(&queue_handle, 1..=6, ())
         .context("compositor does not provide xdg_wm_base")?;
-    let seat = globals
+    let _seat = globals
         .bind::<wl_seat::WlSeat, _, _>(&queue_handle, 1..=9, ())
         .context("compositor does not provide wl_seat")?;
 
