@@ -732,19 +732,39 @@ mod tests {
     }
 
     #[test]
-    fn stale_leave_modifiers_and_key_events_are_rejected_before_dispatch() {
+    fn stale_leave_modifiers_and_key_events_are_rejected_after_reconnection() {
         let old_proxy_id = 10_u32;
         let new_proxy_id = 11_u32;
         let mut lifecycle = KeyboardLifecycle::default();
+
         lifecycle.update_capability(true);
         assert!(lifecycle.enter());
+        assert!(lifecycle.accepts_input());
 
-        // The same early proxy gate runs before the event match, so an old
-        // proxy's Leave cannot clear focus and its Modifiers/Key cannot update
-        // the replacement keyboard's state.
+        // Removing and re-adding the capability creates a new keyboard
+        // generation. The replacement must receive its own focus Enter.
+        assert_eq!(
+            lifecycle.update_capability(false),
+            CapabilityChange::Removed
+        );
+        assert!(!lifecycle.accepts_input());
+        assert_eq!(
+            lifecycle.update_capability(true),
+            CapabilityChange::Added
+        );
+        assert!(!lifecycle.accepts_input());
+        assert!(lifecycle.enter());
+
+        // The common pre-dispatch gate rejects every event variant from the
+        // old proxy, including Leave, Modifiers, and Key.
         assert!(!accepts_keyboard_proxy_event(
             lifecycle.available,
             Some(&new_proxy_id),
+            &old_proxy_id,
+        ));
+        assert!(!accepts_keyboard_proxy_event(
+            lifecycle.available,
+            None,
             &old_proxy_id,
         ));
         assert!(accepts_keyboard_proxy_event(
