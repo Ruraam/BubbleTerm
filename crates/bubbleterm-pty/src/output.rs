@@ -1174,7 +1174,7 @@ mod tests {
                                 .expect("test should still be waiting for the output threshold");
                             stream_ready_sent = true;
                         }
-                    },
+                    }
                     PtyOutputEvent::Closed => break,
                     PtyOutputEvent::Error(error) => {
                         panic!("PTY reader failed during SIGHUP teardown: {error}")
