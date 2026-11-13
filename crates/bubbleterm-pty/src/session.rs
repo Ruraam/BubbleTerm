@@ -5,10 +5,7 @@
 //! winsize and delivers SIGWINCH to the foreground process group when the
 //! slave is its controlling terminal; BubbleTerm must not synthesize SIGWINCH.
 
-use std::{
-    io::{Read, Write},
-    os::fd::FromRawFd,
-};
+use std::io::{Read, Write};
 
 use anyhow::Result;
 use portable_pty::{Child, CommandBuilder, ExitStatus, MasterPty, PtySize, native_pty_system};
@@ -94,33 +91,24 @@ impl PtySession {
         self.master.try_clone_reader()
     }
 
-    /// Clone a PTY reader and an independently owned descriptor for readiness polling.
+    /// Clone a PTY reader and make the shared master descriptor nonblocking.
     ///
-    /// The duplicate descriptor remains valid if the session is dropped before
-    /// the reader. It lets the output worker use a bounded poll interval so
-    /// cancellation never depends on the child producing output.
+    /// Duplicated PTY descriptors share file status flags, so configuring the
+    /// master before returning the reader makes reads cancellable without
+    /// introducing unsafe descriptor ownership or polling code.
     #[cfg(unix)]
-    pub(crate) fn try_clone_reader_with_poll_fd(
-        &self,
-    ) -> Result<(Box<dyn Read + Send>, std::os::fd::OwnedFd)> {
-        use std::os::fd::OwnedFd;
+    pub(crate) fn try_clone_nonblocking_reader(&self) -> Result<Box<dyn Read + Send>> {
+        use nix::fcntl::{FcntlArg, OFlag, fcntl};
 
         let reader = self.master.try_clone_reader()?;
         let master_fd = self
             .master
             .as_raw_fd()
             .ok_or_else(|| anyhow::anyhow!("PTY master does not expose a file descriptor"))?;
-        // SAFETY: master_fd is borrowed from the live PTY master and dup does
-        // not take ownership of it.
-        let poll_fd = unsafe { libc::dup(master_fd) };
-        anyhow::ensure!(
-            poll_fd >= 0,
-            "could not duplicate PTY descriptor: {}",
-            std::io::Error::last_os_error()
-        );
-        // SAFETY: poll_fd was freshly returned by dup and is uniquely owned here.
-        let poll_fd = unsafe { OwnedFd::from_raw_fd(poll_fd) };
-        Ok((reader, poll_fd))
+        let current_flags = fcntl(master_fd, FcntlArg::F_GETFL)?;
+        let nonblocking_flags = OFlag::from_bits_truncate(current_flags) | OFlag::O_NONBLOCK;
+        fcntl(master_fd, FcntlArg::F_SETFL(nonblocking_flags))?;
+        Ok(reader)
     }
 
     /// Take the single writer for sending keyboard input to the PTY.
