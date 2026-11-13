@@ -23,24 +23,36 @@ impl Drop for PtySession {
         // portable-pty starts the command as a session and process-group
         // leader. Signal that whole group so ordinary background children
         // (which inherit the shell's process group) do not outlive the UI.
-        // Do not signal after the leader has exited: its PID could otherwise
-        // have been reused after it was reaped elsewhere.
+        // Keep the leader unreaped until group signaling is complete: its PID
+        // cannot then be recycled for an unrelated process group.
+        let child_running = !matches!(self.child.try_wait(), Ok(Some(_)));
+
         #[cfg(unix)]
-        if let Some(pid) = self
-            .child
-            .process_id()
-            .and_then(|pid| i32::try_from(pid).ok())
-            && self.child.try_wait().ok().flatten().is_none()
-        {
-            let _ = nix::sys::signal::kill(
-                nix::unistd::Pid::from_raw(-pid),
-                nix::sys::signal::Signal::SIGHUP,
-            );
+        if child_running {
+            if let Some(pid) = self
+                .child
+                .process_id()
+                .and_then(|pid| i32::try_from(pid).ok())
+            {
+                let process_group = nix::unistd::Pid::from_raw(-pid);
+                let _ = nix::sys::signal::kill(
+                    process_group,
+                    nix::sys::signal::Signal::SIGHUP,
+                );
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                let _ = nix::sys::signal::kill(
+                    process_group,
+                    nix::sys::signal::Signal::SIGKILL,
+                );
+            }
         }
 
-        // Also use portable-pty's child API to guarantee the direct child is
-        // terminated and reaped, even if group signaling was unavailable.
-        let _ = self.child.kill();
+        // portable-pty remains the authority for terminating and reaping the
+        // direct child. Do not call kill() after try_wait reported it exited:
+        // that could signal an unrelated process if the PID were reused.
+        if child_running {
+            let _ = self.child.kill();
+        }
         let _ = self.child.wait();
     }
 }
