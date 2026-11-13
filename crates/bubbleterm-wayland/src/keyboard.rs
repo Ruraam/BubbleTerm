@@ -289,7 +289,28 @@ impl KeyRepeat {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Instant;
+    use std::{io::Write, time::Instant};
+
+    fn install_test_keymap(keyboard: &mut XkbKeyboard, layout: &str) {
+        let keymap = Keymap::new_from_names(
+            &keyboard.context,
+            &"",
+            &"",
+            &layout,
+            &"",
+            None,
+            xkb::KEYMAP_COMPILE_NO_FLAGS,
+        )
+        .expect("test XKB keymap should compile");
+        let contents = keymap.get_as_string(xkb::KEYMAP_FORMAT_TEXT_V1);
+        let mut file = tempfile::tempfile().expect("temporary keymap file should be available");
+        file.write_all(contents.as_bytes())
+            .expect("test keymap should be written");
+        let fd = file.into();
+        keyboard
+            .install_keymap(fd, contents.len() as u32)
+            .expect("test keymap should install");
+    }
 
     fn keyboard_with_compose_table(contents: &str) -> XkbKeyboard {
         let mut keyboard = XkbKeyboard::new().expect("XKB context should be available");
@@ -445,6 +466,27 @@ mod tests {
         keyboard.update_modifiers(altgr_mask, 0, 0, 0);
 
         assert_eq!(keyboard.translate(18, false), Some("€".as_bytes().to_vec()));
+    }
+
+    #[test]
+    fn replacing_keymap_resets_partial_compose_and_uses_new_layout() {
+        let mut keyboard = keyboard_with_compose_table(TEST_COMPOSE_TABLE);
+        install_test_keymap(&mut keyboard, "us");
+
+        assert_eq!(
+            keyboard.translate_text(xkb::Keysym::dead_acute, String::new()),
+            None
+        );
+
+        install_test_keymap(&mut keyboard, "de");
+
+        // The pending dead key must not compose with input from the new map.
+        assert_eq!(
+            keyboard.translate_text(xkb::Keysym::e, "e".to_owned()),
+            Some(b"e".to_vec())
+        );
+        // Linux evdev KEY_Y (21) is Z on the replacement German layout.
+        assert_eq!(keyboard.translate(21, false), Some(b"z".to_vec()));
     }
 
     #[test]
