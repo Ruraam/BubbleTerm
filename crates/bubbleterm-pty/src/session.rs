@@ -73,7 +73,7 @@ impl PtySession {
 
 impl PtySession {
     #[cfg(unix)]
-    fn signal_process_group(
+    fn send_signal(
         process_group: nix::unistd::Pid,
         signal: nix::sys::signal::Signal,
     ) -> std::io::Result<()> {
@@ -102,7 +102,7 @@ impl PtySession {
         let process_group = nix::unistd::Pid::from_raw(-pid);
 
         // SIGHUP is best-effort; SIGKILL is still attempted if it fails.
-        if Self::signal_process_group(process_group, nix::sys::signal::Signal::SIGHUP).is_ok() {
+        if Self::send_signal(process_group, nix::sys::signal::Signal::SIGHUP).is_ok() {
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
 
@@ -297,29 +297,10 @@ impl PtySession {
                     .process_id()
                     .and_then(|pid| i32::try_from(pid).ok())
                     .ok_or_else(|| std::io::Error::other("PTY child has no valid process ID"))?;
-                match nix::sys::signal::kill(
+                Self::send_signal(
                     nix::unistd::Pid::from_raw(pid),
                     nix::sys::signal::Signal::SIGKILL,
-                ) {
-                    Ok(()) | Err(nix::errno::Errno::ESRCH) => {}
-                    Err(nix::errno::Errno::EINTR) => {
-                        nix::sys::signal::kill(
-                            nix::unistd::Pid::from_raw(pid),
-                            nix::sys::signal::Signal::SIGKILL,
-                        )
-                        .or_else(|error| {
-                            if error == nix::errno::Errno::ESRCH {
-                                Ok(())
-                            } else {
-                                Err(error)
-                            }
-                        })
-                        .map_err(|error| std::io::Error::from_raw_os_error(error as i32))?;
-                    }
-                    Err(error) => {
-                        return Err(std::io::Error::from_raw_os_error(error as i32));
-                    }
-                }
+                )?;
             }
 
             self.observe_child_exit(true)?;
