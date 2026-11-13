@@ -66,11 +66,16 @@ impl PtyOutputReader {
         #[cfg(unix)]
         let worker = {
             let mut reader = session
-                .try_clone_nonblocking_reader()
+                .try_clone_reader()
                 .context("could not clone the PTY output reader")?;
+            let master_fd = session
+                .raw_fd()
+                .context("could not access the PTY master descriptor")?;
             thread::Builder::new()
                 .name("bubbleterm-pty-output".to_owned())
-                .spawn(move || read_loop_unix(&mut reader, sender, worker_cancellation))
+                .spawn(move || {
+                    read_loop_unix(&mut reader, master_fd, sender, worker_cancellation)
+                })
                 .context("could not start the PTY output worker")?
         };
 
@@ -115,44 +120,97 @@ impl PtyOutputReader {
 #[cfg(unix)]
 fn read_loop_unix(
     reader: &mut dyn Read,
+    master_fd: std::os::fd::RawFd,
     sender: SyncSender<PtyOutputEvent>,
     cancellation: Arc<AtomicBool>,
 ) {
+    use mio::{Events, Interest, Poll, Token};
+    use mio::unix::SourceFd;
+
+    let mut poll = match Poll::new() {
+        Ok(poll) => poll,
+        Err(error) => {
+            let _ = sender.send(PtyOutputEvent::Error(error.to_string()));
+            return;
+        }
+    };
+    let mut source = SourceFd(&master_fd);
+    if let Err(error) = poll
+        .registry()
+        .register(&mut source, Token(0), Interest::READABLE)
+    {
+        let _ = sender.send(PtyOutputEvent::Error(error.to_string()));
+        return;
+    }
+
+    let mut events = Events::with_capacity(4);
     let mut buffer = [0_u8; 16 * 1024];
 
     loop {
         if cancellation.load(Ordering::Acquire) {
             break;
         }
-        match reader.read(&mut buffer) {
-            Ok(0) => {
-                let _ = sender.send(PtyOutputEvent::Closed);
-                break;
-            }
-            Ok(count) => {
-                if sender
-                    .send(PtyOutputEvent::Data(buffer[..count].to_vec()))
-                    .is_err()
-                {
-                    break;
-                }
-            }
-            Err(error) if is_normal_pty_close(&error) => {
-                let _ = sender.send(PtyOutputEvent::Closed);
-                break;
-            }
+
+        match poll.poll(&mut events, Some(Duration::from_millis(10))) {
+            Ok(()) if events.is_empty() => continue,
+            Ok(()) => {}
             Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                thread::sleep(Duration::from_millis(10));
-            }
             Err(error) => {
                 let _ = sender.send(PtyOutputEvent::Error(error.to_string()));
                 break;
             }
         }
+
+        if !read_once(reader, &mut buffer, &sender) {
+            break;
+        }
     }
 }
 
+#[cfg(unix)]
+fn read_loop_unix_unpolled(
+    reader: &mut dyn Read,
+    sender: SyncSender<PtyOutputEvent>,
+    cancellation: Arc<AtomicBool>,
+) {
+    let mut buffer = [0_u8; 16 * 1024];
+    loop {
+        if cancellation.load(Ordering::Acquire) || !read_once(reader, &mut buffer, &sender) {
+            break;
+        }
+    }
+}
+
+#[cfg(unix)]
+fn read_once(
+    reader: &mut dyn Read,
+    buffer: &mut [u8],
+    sender: &SyncSender<PtyOutputEvent>,
+) -> bool {
+    match reader.read(buffer) {
+        Ok(0) => {
+            let _ = sender.send(PtyOutputEvent::Closed);
+            false
+        }
+        Ok(count) => sender
+            .send(PtyOutputEvent::Data(buffer[..count].to_vec()))
+            .is_ok(),
+        Err(error) if is_normal_pty_close(&error) => {
+            let _ = sender.send(PtyOutputEvent::Closed);
+            false
+        }
+        Err(error)
+            if error.kind() == io::ErrorKind::Interrupted
+                || error.kind() == io::ErrorKind::WouldBlock =>
+        {
+            true
+        }
+        Err(error) => {
+            let _ = sender.send(PtyOutputEvent::Error(error.to_string()));
+            false
+        }
+    }
+}
 #[cfg(not(unix))]
 fn read_loop(
     reader: &mut dyn Read,
@@ -391,6 +449,71 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn output_reader_preserves_blocking_mode_for_large_pty_writes() {
+        use std::io::Write;
+        use nix::fcntl::{FcntlArg, OFlag, fcntl};
+
+        let spec = LaunchSpec {
+            shell: "/bin/sh".into(),
+            args: vec![
+                "-c".into(),
+                "stty -echo; printf READY; sleep 0.2; cat >/dev/null".into(),
+            ],
+            working_directory: None,
+            environment: Default::default(),
+            kind: ShellKind::Host,
+        };
+        let mut session = PtySession::spawn(
+            &spec,
+            PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            },
+        )
+        .expect("PTY should spawn");
+        let output = PtyOutputReader::spawn(&session).expect("output reader should start");
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        let mut ready = false;
+        while !ready {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            assert!(!remaining.is_zero(), "PTY child did not become ready");
+            match output.recv_timeout(remaining).expect("PTY output timed out") {
+                PtyOutputEvent::Data(chunk) => {
+                    ready = chunk.windows(5).any(|window| window == b"READY");
+                }
+                PtyOutputEvent::Closed => panic!("PTY closed before input test"),
+                PtyOutputEvent::Error(error) => panic!("PTY reader failed: {error}"),
+            }
+        }
+
+        let flags = fcntl(session.raw_fd().expect("PTY master fd should be available"), FcntlArg::F_GETFL)
+            .expect("PTY master flags should be readable");
+        assert!(
+            !OFlag::from_bits_truncate(flags).contains(OFlag::O_NONBLOCK),
+            "starting the output reader must not make PTY writes nonblocking"
+        );
+
+        let mut payload = Vec::with_capacity(32 * 1024);
+        for _ in 0..128 {
+            payload.extend(std::iter::repeat_n(b'x', 255));
+            payload.push(b'\n');
+        }
+        let mut writer = session.take_writer().expect("PTY writer should be available");
+        writer
+            .write_all(&payload)
+            .expect("large PTY paste should complete without WouldBlock");
+        drop(writer);
+
+        let status = session.wait().expect("PTY child should finish after EOF");
+        assert_eq!(status.exit_code(), 0);
+        drop(output);
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn reports_non_terminal_read_errors_once() {
         use std::{
             io,
@@ -409,7 +532,7 @@ mod tests {
         }
 
         let (sender, receiver) = mpsc::sync_channel(2);
-        super::read_loop_unix(&mut FailingReader, sender, Arc::new(AtomicBool::new(false)));
+        super::read_loop_unix_unpolled(&mut FailingReader, sender, Arc::new(AtomicBool::new(false)));
 
         assert_eq!(
             receiver
@@ -440,7 +563,7 @@ mod tests {
         }
 
         let (sender, receiver) = mpsc::sync_channel(2);
-        super::read_loop_unix(
+        super::read_loop_unix_unpolled(
             &mut ClosedPtyReader,
             sender,
             Arc::new(AtomicBool::new(false)),
