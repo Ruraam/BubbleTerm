@@ -402,6 +402,12 @@ impl KeyboardLifecycle {
     }
 }
 
+/// Match an event's proxy identity against the currently active proxy.
+/// Keeping this comparison pure makes stale-proxy rejection directly testable.
+fn is_active_proxy<T: PartialEq>(active_id: Option<&T>, event_id: &T) -> bool {
+    active_id.is_some_and(|active_id| active_id == event_id)
+}
+
 fn supports_xkb_keymap(format: WEnum<wl_keyboard::KeymapFormat>) -> bool {
     format == WEnum::Value(wl_keyboard::KeymapFormat::XkbV1)
 }
@@ -453,11 +459,10 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WindowState {
         // Ignore events from a proxy that is no longer the seat's active
         // keyboard. This also rejects queued events from a removed proxy if
         // the seat has already advertised a replacement keyboard.
+        let event_id = keyboard.id();
+        let active_id = state.keyboard.as_ref().map(Proxy::id);
         if !state.keyboard_lifecycle.available
-            || !state
-                .keyboard
-                .as_ref()
-                .is_some_and(|active| active.id() == keyboard.id())
+            || !is_active_proxy(active_id.as_ref(), &event_id)
         {
             return;
         }
@@ -717,6 +722,16 @@ mod tests {
         );
         assert!(!lifecycle.leave());
         assert!(!lifecycle.enter());
+    }
+
+    #[test]
+    fn stale_keyboard_proxy_events_are_rejected_after_replacement() {
+        let old_proxy_id = 10_u32;
+        let new_proxy_id = 11_u32;
+
+        assert!(is_active_proxy(Some(&new_proxy_id), &new_proxy_id));
+        assert!(!is_active_proxy(Some(&new_proxy_id), &old_proxy_id));
+        assert!(!is_active_proxy(None, &old_proxy_id));
     }
 
     #[test]
