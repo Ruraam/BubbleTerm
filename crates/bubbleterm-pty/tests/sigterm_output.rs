@@ -37,7 +37,7 @@ fn sigterm_during_continuous_output_drains_data_before_one_closed_event() {
         shell: "/bin/sh".into(),
         args: vec![
             "-c".into(),
-            "trap 'printf '\''SIGTERM-ACK\\n'\''; exit 0' TERM; printf '%s\\n' \"$$\" > \"$BUBBLETERM_TEST_PID_FILE\"; while :; do printf '%4096s' x; done".into(),
+            "trap 'printf '\''SIGTERM-ACK\\n'\''; exit 0' TERM; printf '%s\\n' \"$$\" > \"$BUBBLETERM_TEST_PID_FILE\"; while :; do printf '%4096s' x; sleep 0.001; done".into(),
         ],
         working_directory: None,
         environment: [(
