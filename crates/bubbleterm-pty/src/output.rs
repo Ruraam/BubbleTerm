@@ -652,6 +652,157 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn repeated_child_exit_races_deliver_output_before_single_closed_event() {
+        const ITERATIONS: usize = 16;
+        const MARKER: &[u8] = b"pty-exit-race";
+
+        for iteration in 0..ITERATIONS {
+            let spec = LaunchSpec {
+                shell: "/bin/sh".into(),
+                args: vec!["-c".into(), "printf 'pty-exit-race\\n'; exit 0".into()],
+                working_directory: None,
+                environment: Default::default(),
+                kind: ShellKind::Host,
+            };
+            let mut session = PtySession::spawn(
+                &spec,
+                PtySize {
+                    rows: 24,
+                    cols: 80,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                },
+            )
+            .expect("PTY should spawn");
+            let output = PtyOutputReader::spawn(&session).expect("reader should start");
+
+            // Let the child exit before consuming anything. This races the
+            // worker's readiness notification, final read, and Closed send.
+            let child_deadline = std::time::Instant::now() + Duration::from_secs(3);
+            loop {
+                if session
+                    .try_wait()
+                    .expect("child status should be readable")
+                    .is_some()
+                {
+                    break;
+                }
+                assert!(
+                    std::time::Instant::now() < child_deadline,
+                    "child did not exit on iteration {iteration}"
+                );
+                std::thread::yield_now();
+            }
+
+            let event_deadline = std::time::Instant::now() + Duration::from_secs(3);
+            let mut received = Vec::new();
+            let mut closed_events = 0;
+            loop {
+                let remaining =
+                    event_deadline.saturating_duration_since(std::time::Instant::now());
+                assert!(
+                    !remaining.is_zero(),
+                    "PTY closure timed out on iteration {iteration}"
+                );
+                match output
+                    .recv_timeout(remaining)
+                    .expect("PTY event timed out")
+                {
+                    PtyOutputEvent::Data(chunk) => received.extend_from_slice(&chunk),
+                    PtyOutputEvent::Closed => {
+                        closed_events += 1;
+                        break;
+                    }
+                    PtyOutputEvent::Error(error) => {
+                        panic!("PTY reader failed on iteration {iteration}: {error}")
+                    }
+                }
+            }
+
+            assert!(
+                received.windows(MARKER.len()).any(|window| window == MARKER),
+                "final output was lost on iteration {iteration}"
+            );
+            assert_eq!(
+                closed_events, 1,
+                "child exit must produce exactly one Closed event on iteration {iteration}"
+            );
+            assert!(
+                matches!(
+                    output.try_recv(),
+                    Err(std::sync::mpsc::TryRecvError::Disconnected)
+                ),
+                "no event may follow Closed on iteration {iteration}"
+            );
+            drop(output);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dropping_reader_racing_with_natural_child_exit_is_bounded() {
+        const ITERATIONS: usize = 8;
+
+        for iteration in 0..ITERATIONS {
+            let spec = LaunchSpec {
+                shell: "/bin/sh".into(),
+                args: vec![
+                    "-c".into(),
+                    "printf 'reader-drop-race\\n'; sleep 0.02; exit 0".into(),
+                ],
+                working_directory: None,
+                environment: Default::default(),
+                kind: ShellKind::Host,
+            };
+            let mut session = PtySession::spawn(
+                &spec,
+                PtySize {
+                    rows: 24,
+                    cols: 80,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                },
+            )
+            .expect("PTY should spawn");
+            let output = PtyOutputReader::spawn(&session).expect("reader should start");
+
+            // Drop the receiver at approximately the same time the child
+            // exits. Either cancellation or terminal delivery may win.
+            let dropper = std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(20));
+                let started = std::time::Instant::now();
+                drop(output);
+                started.elapsed()
+            });
+
+            let child_deadline = std::time::Instant::now() + Duration::from_secs(3);
+            loop {
+                if session
+                    .try_wait()
+                    .expect("child status should be readable")
+                    .is_some()
+                {
+                    break;
+                }
+                assert!(
+                    std::time::Instant::now() < child_deadline,
+                    "child did not exit on iteration {iteration}"
+                );
+                std::thread::sleep(Duration::from_millis(2));
+            }
+
+            let drop_duration = dropper
+                .join()
+                .expect("reader drop thread should not panic");
+            assert!(
+                drop_duration < Duration::from_secs(2),
+                "reader drop raced with child exit and stalled on iteration {iteration}: {drop_duration:?}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn preserves_repeated_output_bursts_and_interleaved_markers() {
         const BURST_COUNT: usize = 32;
         const BURST_SIZE: usize = 4096;
