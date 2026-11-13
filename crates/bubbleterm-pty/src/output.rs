@@ -1071,7 +1071,7 @@ mod tests {
             shell: "/bin/sh".into(),
             args: vec![
                 "-c".into(),
-                "trap 'echo SIGHUP-ACK; exit 0' HUP; while :; do printf '%4096s' x; sleep 0.001; done".into(),
+                "trap 'echo SIGHUP-ACK; exit 0' HUP; while :; do printf '%4096s' x; done".into(),
             ],
             working_directory: None,
             environment: Default::default(),
