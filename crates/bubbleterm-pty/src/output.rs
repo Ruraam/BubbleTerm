@@ -42,8 +42,9 @@ pub struct PtyOutputReader {
 impl Drop for PtyOutputReader {
     fn drop(&mut self) {
         // Close the receiving side first so a worker blocked on the bounded
-        // channel wakes up. WindowState drops its PtySession before this
-        // reader, which kills/reaps the child and unblocks a pending PTY read.
+        // channel wakes up. On Unix, the poll loop also observes cancellation
+        // while the child is silent. Other platforms still rely on the owning
+        // session being dropped first to interrupt a blocking PTY read.
         self.receiver.take();
         self.cancellation.store(true, Ordering::Release);
         if let Some(worker) = self.worker.take() {
@@ -292,6 +293,7 @@ mod tests {
         drop(output);
     }
 
+    #[cfg(unix)]
     #[test]
     fn dropping_reader_unblocks_worker_when_child_is_silent() {
         let spec = LaunchSpec {
