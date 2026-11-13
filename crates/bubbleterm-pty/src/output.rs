@@ -17,7 +17,7 @@ use std::{
 
 use anyhow::{Context, Result};
 
-use crate::PtySession;
+use crate::{PtySession, session::PtyMasterFd};
 
 /// One item produced by the PTY output worker.
 #[derive(Debug, Eq, PartialEq)]
@@ -69,8 +69,8 @@ impl PtyOutputReader {
                 .try_clone_reader()
                 .context("could not clone the PTY output reader")?;
             let master_fd = session
-                .raw_fd()
-                .context("could not access the PTY master descriptor")?;
+                .try_clone_raw_fd()
+                .context("could not duplicate the PTY master descriptor")?;
             thread::Builder::new()
                 .name("bubbleterm-pty-output".to_owned())
                 .spawn(move || read_loop_unix(&mut reader, master_fd, sender, worker_cancellation))
@@ -118,7 +118,7 @@ impl PtyOutputReader {
 #[cfg(unix)]
 fn read_loop_unix(
     reader: &mut dyn Read,
-    master_fd: std::os::fd::RawFd,
+    master_fd: PtyMasterFd,
     sender: SyncSender<PtyOutputEvent>,
     cancellation: Arc<AtomicBool>,
 ) {
@@ -132,7 +132,8 @@ fn read_loop_unix(
             return;
         }
     };
-    let mut source = SourceFd(&master_fd);
+    let raw_fd = master_fd.as_raw_fd();
+    let mut source = SourceFd(&raw_fd);
     if let Err(error) = poll
         .registry()
         .register(&mut source, Token(0), Interest::READABLE)
