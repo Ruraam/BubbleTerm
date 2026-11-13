@@ -397,8 +397,7 @@ mod tests {
             PtySize {
                 rows: 24,
                 cols: 80,
-                pixel_width: 0,
-                pixel_height: 0,
+                pixel_width: 0,                pixel_height: 0,
             },
         )
         .expect("PTY should spawn");
@@ -725,11 +724,9 @@ mod tests {
                 closed_events, 1,
                 "child exit must produce exactly one Closed event on iteration {iteration}"
             );
-            assert!(
-                matches!(
-                    output.try_recv(),
-                    Err(std::sync::mpsc::TryRecvError::Disconnected)
-                ),
+            assert_eq!(
+                output.recv_timeout(Duration::from_secs(1)),
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected),
                 "no event may follow Closed on iteration {iteration}"
             );
             drop(output);
@@ -797,8 +794,7 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
-    #[test]
+    #[cfg(unix)]    #[test]
     fn preserves_repeated_output_bursts_and_interleaved_markers() {
         const BURST_COUNT: usize = 32;
         const BURST_SIZE: usize = 4096;
@@ -1073,7 +1069,7 @@ mod tests {
             shell: "/bin/sh".into(),
             args: vec![
                 "-c".into(),
-                "trap 'echo SIGHUP-ACK; exit 0' HUP; while :; do printf '%4096s' x; done".into(),
+                "trap 'echo SIGHUP-ACK; exit 0' HUP; while :; do printf '%4096s' x; sleep 0.001; done".into(),
             ],
             working_directory: None,
             environment: Default::default(),
