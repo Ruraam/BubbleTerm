@@ -525,6 +525,116 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
+    fn dropping_session_kills_background_processes_after_leader_exits() {
+        use std::{
+            fs, thread,
+            time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+        };
+
+        let pid_file = std::env::temp_dir().join(format!(
+            "bubbleterm-drop-exited-leader-{}-{}.pid",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system clock should be after Unix epoch")
+                .as_nanos()
+        ));
+        let spec = LaunchSpec {
+            shell: "/bin/sh".into(),
+            args: vec![
+                "-c".into(),
+                "trap '' HUP; sleep 30 & child=$!; printf '%s\\n' \"$child\" > \"$BUBBLETERM_TEST_CHILD_PID_FILE\"; exit 0".into(),
+            ],
+            working_directory: None,
+            environment: [(
+                std::ffi::OsString::from("BUBBLETERM_TEST_CHILD_PID_FILE"),
+                pid_file.as_os_str().to_owned(),
+            )]
+            .into_iter()
+            .collect(),
+            kind: ShellKind::Host,
+        };
+        let session = PtySession::spawn(
+            &spec,
+            PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            },
+        )
+        .expect("PTY shell should spawn");
+        let leader_pid = session
+            .child
+            .process_id()
+            .expect("PTY leader should expose its PID");
+
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let child_pid = loop {
+            if let Ok(contents) = fs::read_to_string(&pid_file) {
+                if let Ok(pid) = contents.trim().parse::<u32>() {
+                    break pid;
+                }
+            }
+            assert!(
+                Instant::now() < deadline,
+                "background child did not publish its PID"
+            );
+            thread::sleep(Duration::from_millis(10));
+        };
+
+        // Wait until the shell is a zombie without reaping it. Drop must still
+        // be able to use its PID as the process-group ID for descendant cleanup.
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            match fs::read_to_string(format!("/proc/{leader_pid}/stat")) {
+                Ok(stat) => {
+                    let state = stat
+                        .rsplit_once(')')
+                        .and_then(|(_, fields)| fields.split_whitespace().next())
+                        .and_then(|field| field.chars().next());
+                    if state == Some('Z') {
+                        break;
+                    }
+                    assert!(
+                        Instant::now() < deadline,
+                        "PTY leader did not exit naturally (state: {state:?})"
+                    );
+                }
+                Err(error) => panic!("could not inspect PTY leader: {error}"),
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        drop(session);
+
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            match fs::read_to_string(format!("/proc/{child_pid}/stat")) {
+                Ok(stat) => {
+                    let state = stat
+                        .rsplit_once(')')
+                        .and_then(|(_, fields)| fields.split_whitespace().next())
+                        .and_then(|field| field.chars().next());
+                    if state == Some('Z') {
+                        break;
+                    }
+                    assert!(
+                        Instant::now() < deadline,
+                        "background process {child_pid} survived PtySession drop after leader exit (state: {state:?})"
+                    );
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+                Err(error) => panic!("could not inspect background process: {error}"),
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        let _ = fs::remove_file(pid_file);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
     fn try_wait_kills_background_processes_after_the_leader_exits() {
         use std::{
             fs, thread,
