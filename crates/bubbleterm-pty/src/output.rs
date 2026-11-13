@@ -1100,7 +1100,10 @@ mod tests {
             let mut received = Vec::new();
             loop {
                 let remaining = deadline.saturating_duration_since(Instant::now());
-                assert!(!remaining.is_zero(), "PTY stream did not close after SIGHUP");
+                assert!(
+                    !remaining.is_zero(),
+                    "PTY stream did not close after SIGHUP"
+                );
                 match output
                     .recv_timeout(remaining)
                     .expect("PTY output timed out during SIGHUP teardown")
