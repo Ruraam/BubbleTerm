@@ -121,8 +121,17 @@ impl Drop for PtySession {
             // WNOWAIT leaves an exited leader as a zombie, reserving its PID
             // while the process group is signaled. Never signal the numeric
             // PGID if observation failed: it may no longer identify our child.
-            if self.child_status.is_none() && self.observe_child_exit(false).is_ok() {
-                let _ = self.terminate_process_group();
+            if self.child_status.is_none() {
+                // Do not signal a numeric PGID if observation failed: it may
+                // no longer identify our child. Fall back to the owned child
+                // handle if group cleanup cannot be completed.
+                let group_termination_failed = match self.observe_child_exit(false) {
+                    Ok(_) => self.terminate_process_group().is_err(),
+                    Err(_) => true,
+                };
+                if group_termination_failed {
+                    let _ = self.child.kill();
+                }
             }
             let _ = self.child.wait();
         }
