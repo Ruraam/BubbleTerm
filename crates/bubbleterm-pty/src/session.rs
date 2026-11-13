@@ -38,6 +38,7 @@ pub struct PtySession {
     master: Box<dyn MasterPty + Send>,
     child: Box<dyn Child + Send + Sync>,
     process_group_terminated: bool,
+    child_status: Option<ExitStatus>,
 }
 
 #[cfg(target_os = "linux")]
@@ -98,7 +99,7 @@ impl Drop for PtySession {
             // WNOWAIT leaves an exited leader as a zombie, reserving its PID
             // while the process group is signaled. Never signal the numeric
             // PGID if observation failed: it may no longer identify our child.
-            if self.observe_child_exit(false).is_ok() {
+            if self.child_status.is_none() && self.observe_child_exit(false).is_ok() {
                 self.terminate_process_group();
             }
             let _ = self.child.wait();
@@ -151,6 +152,7 @@ impl PtySession {
             master: pair.master,
             child,
             process_group_terminated: false,
+            child_status: None,
         })
     }
 
@@ -200,6 +202,10 @@ impl PtySession {
 
     /// Poll the child without blocking.
     pub fn try_wait(&mut self) -> std::io::Result<Option<ExitStatus>> {
+        if let Some(status) = &self.child_status {
+            return Ok(Some(status.clone()));
+        }
+
         #[cfg(target_os = "linux")]
         {
             if !self.observe_child_exit(false)? {
@@ -210,18 +216,28 @@ impl PtySession {
             self.terminate_process_group();
         }
 
-        self.child.try_wait()
+        let status = self.child.try_wait()?;
+        if let Some(status) = &status {
+            self.child_status = Some(status.clone());
+        }
+        Ok(status)
     }
 
     /// Wait for the child process to exit.
     pub fn wait(&mut self) -> std::io::Result<ExitStatus> {
+        if let Some(status) = &self.child_status {
+            return Ok(status.clone());
+        }
+
         #[cfg(target_os = "linux")]
         {
             self.observe_child_exit(true)?;
             self.terminate_process_group();
         }
 
-        self.child.wait()
+        let status = self.child.wait()?;
+        self.child_status = Some(status.clone());
+        Ok(status)
     }
 
     /// Request child termination through portable-pty's child-killer API.
