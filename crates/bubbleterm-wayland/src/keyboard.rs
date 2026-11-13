@@ -289,7 +289,10 @@ impl KeyRepeat {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{io::{Seek, SeekFrom, Write}, time::Instant};
+    use std::{
+        io::{Seek, SeekFrom, Write},
+        time::Instant,
+    };
 
     fn install_test_keymap(keyboard: &mut XkbKeyboard, layout: &str) {
         let keymap = Keymap::new_from_names(
