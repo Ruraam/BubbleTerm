@@ -646,6 +646,25 @@ mod tests {
     }
 
     #[test]
+    fn focus_loss_discards_partial_compose_sequence() {
+        let mut keyboard = keyboard_with_compose_table(TEST_COMPOSE_TABLE);
+
+        assert_eq!(
+            keyboard.translate_text(xkb::Keysym::dead_acute, String::new()),
+            None
+        );
+
+        // This is the actual reset path used when Wayland sends Leave.
+        keyboard.clear_modifiers();
+
+        // The next key must not complete the composition started before focus loss.
+        assert_eq!(
+            keyboard.translate_text(xkb::Keysym::e, "e".to_owned()),
+            Some(b"e".to_vec())
+        );
+    }
+
+    #[test]
     fn replacing_keymap_resets_partial_compose_and_uses_new_layout() {
         let mut keyboard = keyboard_with_compose_table(TEST_COMPOSE_TABLE);
         install_test_keymap(&mut keyboard, "us");
