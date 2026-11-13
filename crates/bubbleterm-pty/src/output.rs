@@ -165,7 +165,7 @@ fn read_loop_unix(
     }
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, test))]
 fn read_loop_unix_unpolled(
     reader: &mut dyn Read,
     sender: SyncSender<PtyOutputEvent>,
