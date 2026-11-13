@@ -448,6 +448,68 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn applies_backpressure_without_losing_output_for_slow_consumers() {
+        const EXPECTED_BYTES: usize = 1024 * 1024;
+        const CONSUMER_DELAY: Duration = Duration::from_millis(2);
+
+        let spec = LaunchSpec {
+            shell: "/bin/sh".into(),
+            args: vec![
+                "-c".into(),
+                "dd if=/dev/zero bs=4096 count=256 2>/dev/null | tr '\\000' z".into(),
+            ],
+            working_directory: None,
+            environment: Default::default(),
+            kind: ShellKind::Host,
+        };
+        let session = PtySession::spawn(
+            &spec,
+            PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            },
+        )
+        .expect("PTY should spawn");
+        let output = PtyOutputReader::spawn(&session).expect("output reader should start");
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(15);
+        let mut received = Vec::with_capacity(EXPECTED_BYTES);
+        loop {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            assert!(
+                !remaining.is_zero(),
+                "slow-consumer PTY read timed out after receiving {} of {EXPECTED_BYTES} bytes",
+                received.len()
+            );
+            match output
+                .recv_timeout(remaining)
+                .expect("slow-consumer PTY output event timed out")
+            {
+                PtyOutputEvent::Data(chunk) => {
+                    received.extend_from_slice(&chunk);
+                    std::thread::sleep(CONSUMER_DELAY);
+                }
+                PtyOutputEvent::Closed => break,
+                PtyOutputEvent::Error(error) => panic!("PTY reader failed: {error}"),
+            }
+        }
+
+        assert_eq!(
+            received.len(),
+            EXPECTED_BYTES,
+            "bounded-channel backpressure must not discard PTY output"
+        );
+        assert!(
+            received.iter().all(|byte| *byte == b'z'),
+            "slow consumption must preserve every byte in the PTY stream"
+        );
+        drop(output);
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn preserves_repeated_output_bursts_and_interleaved_markers() {
         const BURST_COUNT: usize = 32;
         const BURST_SIZE: usize = 4096;
