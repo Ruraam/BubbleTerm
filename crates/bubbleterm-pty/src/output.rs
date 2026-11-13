@@ -1060,4 +1060,70 @@ mod tests {
             "normal PTY closure must not emit duplicate events"
         );
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn delivers_sighup_handler_output_during_a_continuous_pty_stream() {
+        use std::time::Instant;
+
+        const MARKER: &[u8] = b"SIGHUP-ACK";
+        const DEADLINE: Duration = Duration::from_secs(5);
+
+        let spec = LaunchSpec {
+            shell: "/bin/sh".into(),
+            args: vec![
+                "-c".into(),
+                "trap 'printf \\nSIGHUP-ACK\\n; exit 0' HUP; while :; do printf '%4096s' x; done".into(),
+            ],
+            working_directory: None,
+            environment: Default::default(),
+            kind: ShellKind::Host,
+        };
+        let session = PtySession::spawn(
+            &spec,
+            PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            },
+        )
+        .expect("PTY flood process should spawn");
+        let output = PtyOutputReader::spawn(&session).expect("output reader should start");
+
+        // Keep consuming while PtySession::drop sends SIGHUP. This exercises
+        // signal handling while the PTY is continuously producing output,
+        // without allowing the bounded output channel to mask the final trap
+        // marker behind backpressure.
+        let consumer = std::thread::spawn(move || {
+            let deadline = Instant::now() + DEADLINE;
+            let mut received = Vec::new();
+            loop {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                assert!(!remaining.is_zero(), "PTY stream did not close after SIGHUP");
+                match output
+                    .recv_timeout(remaining)
+                    .expect("PTY output timed out during SIGHUP teardown")
+                {
+                    PtyOutputEvent::Data(chunk) => received.extend_from_slice(&chunk),
+                    PtyOutputEvent::Closed => return received,
+                    PtyOutputEvent::Error(error) => {
+                        panic!("PTY reader failed during SIGHUP teardown: {error}")
+                    }
+                }
+            }
+        });
+
+        drop(session);
+
+        let received = consumer
+            .join()
+            .expect("PTY output consumer should finish after SIGHUP");
+        assert!(
+            received
+                .windows(MARKER.len())
+                .any(|window| window == MARKER),
+            "the child's SIGHUP handler output must be delivered before PTY closure"
+        );
+    }
 }
