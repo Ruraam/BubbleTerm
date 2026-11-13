@@ -303,9 +303,7 @@ impl KeyRepeat {
     pub fn configure(&mut self, rate: i32, delay_ms: i32, now: Instant) {
         // Treat malformed compositor values as disabled or cap extreme rates.
         // This prevents a zero-length repeat interval and a busy event loop.
-        self.rate = u32::try_from(rate)
-            .unwrap_or(0)
-            .min(MAX_KEY_REPEAT_RATE);
+        self.rate = u32::try_from(rate).unwrap_or(0).min(MAX_KEY_REPEAT_RATE);
         self.delay = Duration::from_millis(u64::try_from(delay_ms).unwrap_or(0));
         self.next_at = if self.rate > 0 && self.active_key.is_some() {
             Some(now + self.delay)
@@ -828,14 +826,8 @@ mod tests {
         repeat.press(30, true, start);
 
         assert_eq!(repeat.take_due(start), Some(30));
-        assert_eq!(
-            repeat.take_due(start + Duration::from_micros(999)),
-            None
-        );
-        assert_eq!(
-            repeat.take_due(start + Duration::from_millis(1)),
-            Some(30)
-        );
+        assert_eq!(repeat.take_due(start + Duration::from_micros(999)), None);
+        assert_eq!(repeat.take_due(start + Duration::from_millis(1)), Some(30));
     }
 
     #[test]
