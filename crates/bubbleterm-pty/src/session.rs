@@ -271,7 +271,7 @@ impl PtySession {
 
             self.observe_child_exit(true)?;
             self.terminate_process_group();
-            return Ok(());
+            Ok(())
         }
 
         #[cfg(not(target_os = "linux"))]
