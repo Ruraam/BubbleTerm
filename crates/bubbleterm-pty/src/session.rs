@@ -615,6 +615,91 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
+    fn wait_kills_background_processes_after_the_leader_exits() {
+        use std::{
+            fs, thread,
+            time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+        };
+
+        let pid_file = std::env::temp_dir().join(format!(
+            "bubbleterm-wait-descendant-{}-{}.pid",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system clock should be after Unix epoch")
+                .as_nanos()
+        ));
+        let spec = LaunchSpec {
+            shell: "/bin/sh".into(),
+            args: vec![
+                "-c".into(),
+                "trap '' HUP; sleep 30 & child=$!; printf '%s\\n' \"$child\" > \"$BUBBLETERM_TEST_CHILD_PID_FILE\"; exit 23".into(),
+            ],
+            working_directory: None,
+            environment: [(
+                std::ffi::OsString::from("BUBBLETERM_TEST_CHILD_PID_FILE"),
+                pid_file.as_os_str().to_owned(),
+            )]
+            .into_iter()
+            .collect(),
+            kind: ShellKind::Host,
+        };
+        let mut session = PtySession::spawn(
+            &spec,
+            PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            },
+        )
+        .expect("PTY shell should spawn");
+
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let child_pid = loop {
+            if let Ok(contents) = fs::read_to_string(&pid_file) {
+                if let Ok(pid) = contents.trim().parse::<u32>() {
+                    break pid;
+                }
+            }
+            assert!(
+                Instant::now() < deadline,
+                "background child did not publish its PID"
+            );
+            thread::sleep(Duration::from_millis(10));
+        };
+
+        let status = session.wait().expect("wait should observe natural exit");
+        assert_eq!(status.exit_code(), 23);
+
+        // wait() must terminate the inherited group before reaping the leader.
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            match fs::read_to_string(format!("/proc/{child_pid}/stat")) {
+                Ok(stat) => {
+                    let state = stat
+                        .rsplit_once(')')
+                        .and_then(|(_, fields)| fields.split_whitespace().next())
+                        .and_then(|field| field.chars().next());
+                    if state == Some('Z') {
+                        break;
+                    }
+                    assert!(
+                        Instant::now() < deadline,
+                        "background process {child_pid} survived wait() (state: {state:?})"
+                    );
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+                Err(error) => panic!("could not inspect background process: {error}"),
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        let _ = fs::remove_file(pid_file);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
     fn kill_terminates_background_processes_before_wait() {
         use std::{
             fs, thread,
