@@ -5,7 +5,10 @@
 //! winsize and delivers SIGWINCH to the foreground process group when the
 //! slave is its controlling terminal; BubbleTerm must not synthesize SIGWINCH.
 
-use std::io::{Read, Write};
+use std::{
+    io::{Read, Write},
+    os::fd::FromRawFd,
+};
 
 use anyhow::Result;
 use portable_pty::{Child, CommandBuilder, ExitStatus, MasterPty, PtySize, native_pty_system};
@@ -100,21 +103,22 @@ impl PtySession {
     pub(crate) fn try_clone_reader_with_poll_fd(
         &self,
     ) -> Result<(Box<dyn Read + Send>, std::os::fd::OwnedFd)> {
-        use std::os::fd::{FromRawFd, OwnedFd};
+        use std::os::fd::OwnedFd;
 
         let reader = self.master.try_clone_reader()?;
         let master_fd = self
             .master
             .as_raw_fd()
             .ok_or_else(|| anyhow::anyhow!("PTY master does not expose a file descriptor"))?;
-        // SAFETY: dup returns a new owned descriptor on success.
+        // SAFETY: master_fd is borrowed from the live PTY master and dup does
+        // not take ownership of it.
         let poll_fd = unsafe { libc::dup(master_fd) };
         anyhow::ensure!(
             poll_fd >= 0,
             "could not duplicate PTY descriptor: {}",
             std::io::Error::last_os_error()
         );
-        // SAFETY: ownership of the newly duplicated descriptor is transferred here.
+        // SAFETY: poll_fd was freshly returned by dup and is uniquely owned here.
         let poll_fd = unsafe { OwnedFd::from_raw_fd(poll_fd) };
         Ok((reader, poll_fd))
     }
