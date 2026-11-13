@@ -58,8 +58,6 @@ fn function_key_sequence(keysym: xkb::Keysym, state: &xkb::State) -> Option<Vec<
     })
 }
 
-
-
 /// Stateful translator for the compositor-provided XKB keymap.
 pub struct XkbKeyboard {
     context: XkbContext,
@@ -914,7 +912,10 @@ mod tests {
     #[test]
     fn function_keys_encode_shift_ctrl_alt_and_super_modifiers() {
         let mut keyboard = keyboard_with_layouts("us");
-        let keymap = keyboard.keymap.as_ref().expect("keymap should be installed");
+        let keymap = keyboard
+            .keymap
+            .as_ref()
+            .expect("keymap should be installed");
         let modifier_mask = |name: &str| {
             let index = keymap.mod_get_index(name);
             assert_ne!(index, xkb::MOD_INVALID, "missing {name} modifier");
