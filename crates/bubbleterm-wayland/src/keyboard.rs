@@ -474,6 +474,55 @@ mod tests {
     }
 
     #[test]
+    fn modifier_snapshots_apply_depressed_latched_and_locked_masks() {
+        let mut keyboard = keyboard_with_layouts("us");
+        let keymap = keyboard
+            .keymap
+            .as_ref()
+            .expect("keymap should be installed");
+        let shift = keymap.mod_get_index("Shift");
+        assert_ne!(shift, xkb::MOD_INVALID);
+        let shift_mask = 1_u32 << shift;
+
+        // A depressed modifier affects the current key state.
+        keyboard.update_modifiers(shift_mask, 0, 0, 0);
+        assert_eq!(keyboard.translate(30, false), Some(b"A".to_vec()));
+
+        // A fresh compositor snapshot replaces the previous depressed state.
+        keyboard.update_modifiers(0, 0, 0, 0);
+        assert_eq!(keyboard.translate(30, false), Some(b"a".to_vec()));
+
+        // Latched and locked modifiers also contribute to the effective mask.
+        keyboard.update_modifiers(0, shift_mask, 0, 0);
+        assert_eq!(keyboard.translate(30, false), Some(b"A".to_vec()));
+        keyboard.update_modifiers(0, 0, shift_mask, 0);
+        assert_eq!(keyboard.translate(30, false), Some(b"A".to_vec()));
+
+        // Clearing the locked mask must restore the unmodified symbol.
+        keyboard.update_modifiers(0, 0, 0, 0);
+        assert_eq!(keyboard.translate(30, false), Some(b"a".to_vec()));
+    }
+
+    #[test]
+    fn group_snapshot_change_preserves_an_active_compose_sequence() {
+        let mut keyboard = keyboard_with_compose_table(TEST_COMPOSE_TABLE);
+        install_test_keymap(&mut keyboard, "us,de");
+
+        assert_eq!(
+            keyboard.translate_text(xkb::Keysym::dead_acute, String::new()),
+            None
+        );
+
+        // The compositor can report a layout change between two key events.
+        keyboard.update_modifiers(0, 0, 0, 1);
+
+        assert_eq!(
+            keyboard.translate_text(xkb::Keysym::e, "e".to_owned()),
+            Some("é".as_bytes().to_vec())
+        );
+    }
+
+    #[test]
     fn replacing_keymap_resets_partial_compose_and_uses_new_layout() {
         let mut keyboard = keyboard_with_compose_table(TEST_COMPOSE_TABLE);
         install_test_keymap(&mut keyboard, "us");
