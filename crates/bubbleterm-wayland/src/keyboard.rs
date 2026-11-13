@@ -792,17 +792,17 @@ mod tests {
     fn special_keys_emit_expected_terminal_sequences() {
         let mut keyboard = keyboard_with_layouts("us");
         let cases: &[(u32, &[u8])] = &[
-            (28, b"\\r"),       // Enter
-            (96, b"\\r"),       // Keypad Enter
-            (14, b"\\x7f"),     // Backspace
-            (15, b"\\t"),       // Tab
-            (1, b"\\x1b"),      // Escape
-            (102, b"\\x1b[H"),  // Home
-            (107, b"\\x1b[F"),  // End
-            (110, b"\\x1b[2~"), // Insert
-            (111, b"\\x1b[3~"), // Delete
-            (104, b"\\x1b[5~"), // Page Up
-            (109, b"\\x1b[6~"), // Page Down
+            (28, b"\r"),       // Enter
+            (96, b"\r"),       // Keypad Enter
+            (14, b"\x7f"),     // Backspace
+            (15, b"\t"),       // Tab
+            (1, b"\x1b"),      // Escape
+            (102, b"\x1b[H"),  // Home
+            (107, b"\x1b[F"),  // End
+            (110, b"\x1b[2~"), // Insert
+            (111, b"\x1b[3~"), // Delete
+            (104, b"\x1b[5~"), // Page Up
+            (109, b"\x1b[6~"), // Page Down
         ];
 
         for (evdev_keycode, expected) in cases {
@@ -818,10 +818,10 @@ mod tests {
     fn arrow_keys_respect_application_cursor_mode() {
         let mut keyboard = keyboard_with_layouts("us");
         let cases: &[(u32, &[u8], &[u8])] = &[
-            (103, b"\\x1b[A", b"\\x1bOA"), // Up
-            (108, b"\\x1b[B", b"\\x1bOB"), // Down
-            (106, b"\\x1b[C", b"\\x1bOC"), // Right
-            (105, b"\\x1b[D", b"\\x1bOD"), // Left
+            (103, b"\x1b[A", b"\x1bOA"), // Up
+            (108, b"\x1b[B", b"\x1bOB"), // Down
+            (106, b"\x1b[C", b"\x1bOC"), // Right
+            (105, b"\x1b[D", b"\x1bOD"), // Left
         ];
 
         for (evdev_keycode, normal, application) in cases {
