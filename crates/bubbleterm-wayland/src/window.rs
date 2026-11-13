@@ -133,10 +133,12 @@ pub fn run_wayland_window(session: PtySession, cell_metrics: CellMetrics) -> Res
         let mut poll_fds = [PollFd::new(read_guard.connection_fd(), PollFlags::POLLIN)];
         let poll_result =
             poll(&mut poll_fds, 8_u16).context("could not poll the Wayland connection")?;
+        let revents = poll_fds[0].revents().unwrap_or_else(PollFlags::empty);
+        if revents.contains(PollFlags::POLLNVAL) {
+            bail!("Wayland connection file descriptor became invalid while polling");
+        }
         let socket_ready = poll_result > 0
-            && poll_fds[0].revents().is_some_and(|flags| {
-                flags.intersects(PollFlags::POLLIN | PollFlags::POLLHUP | PollFlags::POLLERR)
-            });
+            && revents.intersects(PollFlags::POLLIN | PollFlags::POLLHUP | PollFlags::POLLERR);
 
         if socket_ready {
             read_guard.read().context("could not read Wayland events")?;
