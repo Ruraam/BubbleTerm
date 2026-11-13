@@ -672,6 +672,9 @@ mod tests {
         session
             .kill()
             .expect("kill should terminate the process group");
+        session
+            .kill()
+            .expect("repeated kill should be harmless");
 
         // kill() itself must clean up descendants; this assertion deliberately
         // runs before wait() to catch implementations that defer cleanup.
@@ -697,11 +700,20 @@ mod tests {
             thread::sleep(Duration::from_millis(10));
         }
 
-        let status = session.wait().expect("wait should reap the killed leader");
+        let status = session
+            .try_wait()
+            .expect("try_wait should observe the killed leader")
+            .expect("killed leader should already have exited");
         assert!(
             !status.success(),
             "killed child unexpectedly reported success"
         );
+
+        let waited_status = session.wait().expect("wait should return the cached status");
+        assert_eq!(waited_status.exit_code(), status.exit_code());
+        session
+            .kill()
+            .expect("kill after wait should be harmless");
         let _ = fs::remove_file(pid_file);
     }
 
