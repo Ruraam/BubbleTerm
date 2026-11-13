@@ -1044,4 +1044,38 @@ mod tests {
         let fd = file.into();
         assert!(keyboard.install_keymap(fd, 0).is_err());
     }
+
+    #[test]
+    fn rejects_keymap_larger_than_safety_limit_before_reading() {
+        let mut keyboard = XkbKeyboard::new().expect("XKB context should be available");
+        let file = tempfile::tempfile().expect("temporary file should be available");
+        file.set_len(u64::from(MAX_KEYMAP_BYTES) + 1)
+            .expect("temporary keymap file should be extended");
+
+        assert!(
+            keyboard
+                .install_keymap(file.into(), MAX_KEYMAP_BYTES + 1)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn rejects_keymap_fd_shorter_than_advertised_size() {
+        let mut keyboard = XkbKeyboard::new().expect("XKB context should be available");
+        let mut file = tempfile::tempfile().expect("temporary file should be available");
+        file.write_all(b"xkb")
+            .expect("temporary keymap bytes should be written");
+
+        assert!(keyboard.install_keymap(file.into(), 4).is_err());
+    }
+
+    #[test]
+    fn rejects_keymap_with_invalid_utf8() {
+        let mut keyboard = XkbKeyboard::new().expect("XKB context should be available");
+        let mut file = tempfile::tempfile().expect("temporary file should be available");
+        file.write_all(&[0xff])
+            .expect("invalid UTF-8 test byte should be written");
+
+        assert!(keyboard.install_keymap(file.into(), 1).is_err());
+    }
 }
