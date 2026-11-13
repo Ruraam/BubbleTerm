@@ -748,10 +748,7 @@ mod tests {
             CapabilityChange::Removed
         );
         assert!(!lifecycle.accepts_input());
-        assert_eq!(
-            lifecycle.update_capability(true),
-            CapabilityChange::Added
-        );
+        assert_eq!(lifecycle.update_capability(true), CapabilityChange::Added);
         assert!(!lifecycle.accepts_input());
         assert!(lifecycle.enter());
 
