@@ -466,9 +466,6 @@ fn destroy_active_seat(state: &mut WindowState) {
     if let Some(keyboard) = state.keyboard.take() {
         if keyboard.version() >= 3 {
             keyboard.release();
-        } else {
-            keyboard.destroy();
-        }
     }
     state.keyboard_lifecycle = KeyboardLifecycle::default();
     state.xkb.clear_keymap();
@@ -478,9 +475,6 @@ fn destroy_active_seat(state: &mut WindowState) {
     if let Some((_, seat)) = state.seat.take() {
         if seat.version() >= 5 {
             seat.release();
-        } else {
-            seat.destroy();
-        }
     }
 }
 
