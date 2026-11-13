@@ -79,10 +79,11 @@ impl PtyOutputReader {
         &self,
         timeout: Duration,
     ) -> std::result::Result<PtyOutputEvent, RecvTimeoutError> {
-        self.receiver.as_ref().map_or(
-            Err(RecvTimeoutError::Disconnected),
-            |receiver| receiver.recv_timeout(timeout),
-        )
+        self.receiver
+            .as_ref()
+            .map_or(Err(RecvTimeoutError::Disconnected), |receiver| {
+                receiver.recv_timeout(timeout)
+            })
     }
 }
 
