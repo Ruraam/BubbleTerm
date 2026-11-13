@@ -145,8 +145,8 @@ pub fn run_wayland_window(session: PtySession, cell_metrics: CellMetrics) -> Res
         // is drained on the next iteration without blocking the UI thread.
     }
 
-    // Keep the bound seat alive for as long as its keyboard proxy may exist.
-    drop(seat);
+    // Locals are dropped in reverse declaration order: WindowState (and its
+    // keyboard proxy) is destroyed before the bound seat proxy.
     Ok(())
 }
 
