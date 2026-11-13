@@ -289,7 +289,7 @@ impl KeyRepeat {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{io::Write, time::Instant};
+    use std::{io::{Seek, SeekFrom, Write}, time::Instant};
 
     fn install_test_keymap(keyboard: &mut XkbKeyboard, layout: &str) {
         let keymap = Keymap::new_from_names(
@@ -306,6 +306,8 @@ mod tests {
         let mut file = tempfile::tempfile().expect("temporary keymap file should be available");
         file.write_all(contents.as_bytes())
             .expect("test keymap should be written");
+        file.seek(SeekFrom::Start(0))
+            .expect("test keymap file should rewind");
         let fd = file.into();
         keyboard
             .install_keymap(fd, contents.len() as u32)
