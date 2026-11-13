@@ -91,6 +91,30 @@ impl PtySession {
         self.master.try_clone_reader()
     }
 
+    /// Clone a PTY reader and an independently owned descriptor for readiness polling.
+    ///
+    /// The duplicate descriptor remains valid if the session is dropped before
+    /// the reader. It lets the output worker use a bounded poll interval so
+    /// cancellation never depends on the child producing output.
+    #[cfg(unix)]
+    pub(crate) fn try_clone_reader_with_poll_fd(
+        &self,
+    ) -> Result<(Box<dyn Read + Send>, std::os::fd::OwnedFd)> {
+        use std::os::fd::{FromRawFd, OwnedFd};
+
+        let reader = self.master.try_clone_reader()?;
+        let master_fd = self
+            .master
+            .as_raw_fd()
+            .ok_or_else(|| anyhow::anyhow!("PTY master does not expose a file descriptor"))?;
+        // SAFETY: dup returns a new owned descriptor on success.
+        let poll_fd = unsafe { libc::dup(master_fd) };
+        anyhow::ensure!(poll_fd >= 0, "could not duplicate PTY descriptor: {}", std::io::Error::last_os_error());
+        // SAFETY: ownership of the newly duplicated descriptor is transferred here.
+        let poll_fd = unsafe { OwnedFd::from_raw_fd(poll_fd) };
+        Ok((reader, poll_fd))
+    }
+
     /// Take the single writer for sending keyboard input to the PTY.
     pub fn take_writer(&self) -> Result<Box<dyn Write + Send>> {
         self.master.take_writer()
