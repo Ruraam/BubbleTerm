@@ -646,7 +646,9 @@ mod tests {
             thread::sleep(Duration::from_millis(10));
         };
 
-        session.kill().expect("kill should terminate the process group");
+        session
+            .kill()
+            .expect("kill should terminate the process group");
 
         // kill() itself must clean up descendants; this assertion deliberately
         // runs before wait() to catch implementations that defer cleanup.
