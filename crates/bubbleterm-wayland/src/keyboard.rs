@@ -144,6 +144,18 @@ impl XkbKeyboard {
             xkb::Keysym::Delete => b"\x1b[3~",
             xkb::Keysym::Page_Up => b"\x1b[5~",
             xkb::Keysym::Page_Down => b"\x1b[6~",
+            xkb::Keysym::F1 => b"\x1bOP",
+            xkb::Keysym::F2 => b"\x1bOQ",
+            xkb::Keysym::F3 => b"\x1bOR",
+            xkb::Keysym::F4 => b"\x1bOS",
+            xkb::Keysym::F5 => b"\x1b[15~",
+            xkb::Keysym::F6 => b"\x1b[17~",
+            xkb::Keysym::F7 => b"\x1b[18~",
+            xkb::Keysym::F8 => b"\x1b[19~",
+            xkb::Keysym::F9 => b"\x1b[20~",
+            xkb::Keysym::F10 => b"\x1b[21~",
+            xkb::Keysym::F11 => b"\x1b[23~",
+            xkb::Keysym::F12 => b"\x1b[24~",
             _ => {
                 let text = state.key_get_utf8(keycode);
                 return self.translate_text(keysym, text);
@@ -834,6 +846,33 @@ mod tests {
                 keyboard.translate(*evdev_keycode, true).as_deref(),
                 Some(*application),
                 "unexpected application cursor sequence for evdev keycode {evdev_keycode}"
+            );
+        }
+    }
+
+    #[test]
+    fn function_keys_emit_expected_xterm_sequences() {
+        let mut keyboard = keyboard_with_layouts("us");
+        let cases: &[(u32, &[u8])] = &[
+            (59, b"\x1bOP"),    // F1
+            (60, b"\x1bOQ"),    // F2
+            (61, b"\x1bOR"),    // F3
+            (62, b"\x1bOS"),    // F4
+            (63, b"\x1b[15~"),  // F5
+            (64, b"\x1b[17~"),  // F6
+            (65, b"\x1b[18~"),  // F7
+            (66, b"\x1b[19~"),  // F8
+            (67, b"\x1b[20~"),  // F9
+            (68, b"\x1b[21~"),  // F10
+            (87, b"\x1b[23~"),  // F11
+            (88, b"\x1b[24~"),  // F12
+        ];
+
+        for (evdev_keycode, expected) in cases {
+            assert_eq!(
+                keyboard.translate(*evdev_keycode, false).as_deref(),
+                Some(*expected),
+                "unexpected function-key sequence for evdev keycode {evdev_keycode}"
             );
         }
     }
