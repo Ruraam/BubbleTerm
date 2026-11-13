@@ -564,6 +564,88 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn drains_queued_output_before_exactly_one_closed_event_after_child_exit() {
+        const EXPECTED_BYTES: usize = 8 * 1024;
+
+        let spec = LaunchSpec {
+            shell: "/bin/sh".into(),
+            args: vec![
+                "-c".into(),
+                "head -c 8192 /dev/zero | tr '\\000' x".into(),
+            ],
+            working_directory: None,
+            environment: Default::default(),
+            kind: ShellKind::Host,
+        };
+        let mut session = PtySession::spawn(
+            &spec,
+            PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            },
+        )
+        .expect("PTY should spawn");
+        let output = PtyOutputReader::spawn(&session).expect("output reader should start");
+
+        // Wait for the child to exit without consuming the output channel.
+        // The small payload fits in the PTY and bounded channel, leaving its
+        // Data event(s) queued when the worker publishes the terminal event.
+        let child_deadline = std::time::Instant::now() + Duration::from_secs(3);
+        loop {
+            if session
+                .try_wait()
+                .expect("child status should be readable")
+                .is_some()
+            {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < child_deadline,
+                "child did not exit while output remained queued"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        let mut received = Vec::with_capacity(EXPECTED_BYTES);
+        let mut closed_events = 0;
+        loop {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            assert!(!remaining.is_zero(), "PTY output did not reach terminal closure");
+            match output
+                .recv_timeout(remaining)
+                .expect("PTY output event timed out")
+            {
+                PtyOutputEvent::Data(chunk) => received.extend_from_slice(&chunk),
+                PtyOutputEvent::Closed => {
+                    closed_events += 1;
+                    break;
+                }
+                PtyOutputEvent::Error(error) => panic!("PTY reader failed: {error}"),
+            }
+        }
+
+        assert_eq!(
+            received.len(),
+            EXPECTED_BYTES,
+            "all queued output must be delivered before the terminal event"
+        );
+        assert!(
+            received.iter().all(|byte| *byte == b'x'),
+            "queued output bytes must retain their contents and order"
+        );
+        assert_eq!(closed_events, 1, "PTY closure must be reported exactly once");
+        assert!(
+            matches!(output.try_recv(), Err(std::sync::mpsc::TryRecvError::Disconnected)),
+            "no duplicate or trailing events may follow Closed"
+        );
+        drop(output);
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn preserves_repeated_output_bursts_and_interleaved_markers() {
         const BURST_COUNT: usize = 32;
         const BURST_SIZE: usize = 4096;
