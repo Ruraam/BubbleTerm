@@ -53,9 +53,21 @@ pub fn run_wayland_window(session: PtySession, cell_metrics: CellMetrics) -> Res
     let wm_base = globals
         .bind::<xdg_wm_base::XdgWmBase, _, _>(&queue_handle, 1..=6, ())
         .context("compositor does not provide xdg_wm_base")?;
-    let _seat = globals
-        .bind::<wl_seat::WlSeat, _, _>(&queue_handle, 1..=9, ())
+    let mut seat_registry = SeatRegistry::default();
+    for global in globals.contents().clone_list() {
+        if global.interface == "wl_seat" {
+            seat_registry.register(global.name, global.version);
+        }
+    }
+    let initial_seat = seat_registry
+        .preferred()
         .context("compositor does not provide wl_seat")?;
+    let seat = globals.registry().bind(
+        initial_seat.name,
+        initial_seat.version.min(9),
+        &queue_handle,
+        (),
+    );
 
     let surface = compositor.create_surface(&queue_handle, ());
     let xdg_surface = wm_base.get_xdg_surface(&surface, &queue_handle, ());
@@ -86,6 +98,8 @@ pub fn run_wayland_window(session: PtySession, cell_metrics: CellMetrics) -> Res
         cell_metrics,
         shm,
         surface,
+        seat: Some((initial_seat.name, seat)),
+        seat_registry,
         keyboard: None,
         keyboard_lifecycle: KeyboardLifecycle::default(),
         xkb: XkbKeyboard::new()?,
@@ -155,8 +169,8 @@ pub fn run_wayland_window(session: PtySession, cell_metrics: CellMetrics) -> Res
         // is drained on the next iteration without blocking the UI thread.
     }
 
-    // Locals are dropped in reverse declaration order: WindowState (and its
-    // keyboard proxy) is destroyed before the bound seat proxy.
+    // WindowState owns both the active seat and keyboard proxies. Their
+    // protocol destructors are sent explicitly when a registry global vanishes.
     Ok(())
 }
 
@@ -308,6 +322,8 @@ struct WindowState {
     cell_metrics: CellMetrics,
     shm: wl_shm::WlShm,
     surface: wl_surface::WlSurface,
+    seat: Option<(u32, wl_seat::WlSeat)>,
+    seat_registry: SeatRegistry,
     keyboard: Option<wl_keyboard::WlKeyboard>,
     keyboard_lifecycle: KeyboardLifecycle,
     xkb: XkbKeyboard,
@@ -324,13 +340,43 @@ struct WindowState {
 
 impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for WindowState {
     fn event(
-        _: &mut Self,
-        _: &wl_registry::WlRegistry,
-        _: wl_registry::Event,
+        state: &mut Self,
+        registry: &wl_registry::WlRegistry,
+        event: wl_registry::Event,
         _: &GlobalListContents,
         _: &Connection,
-        _: &QueueHandle<Self>,
+        queue_handle: &QueueHandle<Self>,
     ) {
+        match event {
+            wl_registry::Event::Global {
+                name,
+                interface,
+                version,
+            } if interface == "wl_seat" => {
+                if state.seat_registry.register(name, version) && state.seat.is_none() {
+                    state.seat = Some((
+                        name,
+                        registry.bind(name, version.min(9), queue_handle, ()),
+                    ));
+                }
+            }
+            wl_registry::Event::GlobalRemove { name } => {
+                if !state.seat_registry.remove(name) {
+                    return;
+                }
+
+                if state.seat.as_ref().is_some_and(|(active_name, _)| *active_name == name) {
+                    destroy_active_seat(state);
+                    if let Some(next) = state.seat_registry.preferred() {
+                        state.seat = Some((
+                            next.name,
+                            registry.bind(next.name, next.version.min(9), queue_handle, ()),
+                        ));
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 }
 
@@ -372,20 +418,17 @@ struct KeyboardLifecycle {
     focused: bool,
 }
 
-#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct SeatGlobal {
     name: u32,
     version: u32,
 }
 
-#[cfg(test)]
 #[derive(Debug, Default, PartialEq, Eq)]
 struct SeatRegistry {
     seats: Vec<SeatGlobal>,
 }
 
-#[cfg(test)]
 impl SeatRegistry {
     /// Records a seat global unless its registry name is already present.
     fn register(&mut self, name: u32, version: u32) -> bool {
@@ -415,6 +458,28 @@ enum CapabilityChange {
     Added,
     Removed,
     Unchanged,
+}
+
+fn destroy_active_seat(state: &mut WindowState) {
+    if let Some(keyboard) = state.keyboard.take() {
+        if keyboard.version() >= 3 {
+            keyboard.release();
+        } else {
+            keyboard.destroy();
+        }
+    }
+    state.keyboard_lifecycle = KeyboardLifecycle::default();
+    state.xkb.clear_keymap();
+    state.xkb.clear_modifiers();
+    state.key_repeat.clear();
+
+    if let Some((_, seat)) = state.seat.take() {
+        if seat.version() >= 5 {
+            seat.release();
+        } else {
+            seat.destroy();
+        }
+    }
 }
 
 impl KeyboardLifecycle {
