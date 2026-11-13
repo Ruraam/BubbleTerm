@@ -402,10 +402,15 @@ impl KeyboardLifecycle {
     }
 }
 
-/// Match an event's proxy identity against the currently active proxy.
-/// Keeping this comparison pure makes stale-proxy rejection directly testable.
-fn is_active_proxy<T: PartialEq>(active_id: Option<&T>, event_id: &T) -> bool {
-    active_id.is_some_and(|active_id| active_id == event_id)
+/// Accept events only from the currently advertised keyboard proxy.
+/// The early dispatch guard uses this for every event variant, including
+/// Leave, Modifiers, and Key, so stale proxies cannot mutate current state.
+fn accepts_keyboard_proxy_event<T: PartialEq>(
+    available: bool,
+    active_id: Option<&T>,
+    event_id: &T,
+) -> bool {
+    available && active_id.is_some_and(|active_id| active_id == event_id)
 }
 
 fn supports_xkb_keymap(format: WEnum<wl_keyboard::KeymapFormat>) -> bool {
@@ -461,7 +466,11 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WindowState {
         // the seat has already advertised a replacement keyboard.
         let event_id = keyboard.id();
         let active_id = state.keyboard.as_ref().map(Proxy::id);
-        if !state.keyboard_lifecycle.available || !is_active_proxy(active_id.as_ref(), &event_id) {
+        if !accepts_keyboard_proxy_event(
+            state.keyboard_lifecycle.available,
+            active_id.as_ref(),
+            &event_id,
+        ) {
             return;
         }
 
@@ -635,7 +644,7 @@ impl Dispatch<xdg_toplevel::XdgToplevel, ()> for WindowState {
 mod tests {
     use super::{
         CapabilityChange, KeyboardLifecycle, checked_buffer_layout, has_keyboard_capability,
-        is_active_proxy, supports_xkb_keymap,
+        accepts_keyboard_proxy_event, supports_xkb_keymap,
     };
     use crate::keyboard::KeyRepeat;
     use std::time::{Duration, Instant};
@@ -723,13 +732,32 @@ mod tests {
     }
 
     #[test]
-    fn stale_keyboard_proxy_events_are_rejected_after_replacement() {
+    fn stale_leave_modifiers_and_key_events_are_rejected_before_dispatch() {
         let old_proxy_id = 10_u32;
         let new_proxy_id = 11_u32;
+        let mut lifecycle = KeyboardLifecycle::default();
+        lifecycle.update_capability(true);
+        assert!(lifecycle.enter());
 
-        assert!(is_active_proxy(Some(&new_proxy_id), &new_proxy_id));
-        assert!(!is_active_proxy(Some(&new_proxy_id), &old_proxy_id));
-        assert!(!is_active_proxy(None, &old_proxy_id));
+        // The same early proxy gate runs before the event match, so an old
+        // proxy's Leave cannot clear focus and its Modifiers/Key cannot update
+        // the replacement keyboard's state.
+        assert!(!accepts_keyboard_proxy_event(
+            lifecycle.available,
+            Some(&new_proxy_id),
+            &old_proxy_id,
+        ));
+        assert!(accepts_keyboard_proxy_event(
+            lifecycle.available,
+            Some(&new_proxy_id),
+            &new_proxy_id,
+        ));
+        assert!(!accepts_keyboard_proxy_event(
+            false,
+            Some(&new_proxy_id),
+            &new_proxy_id,
+        ));
+        assert!(lifecycle.accepts_input());
     }
 
     #[test]
