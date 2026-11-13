@@ -373,6 +373,41 @@ struct KeyboardLifecycle {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SeatGlobal {
+    name: u32,
+    version: u32,
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct SeatRegistry {
+    seats: Vec<SeatGlobal>,
+}
+
+impl SeatRegistry {
+    /// Records a seat global unless its registry name is already present.
+    fn register(&mut self, name: u32, version: u32) -> bool {
+        if self.seats.iter().any(|seat| seat.name == name) {
+            return false;
+        }
+
+        self.seats.push(SeatGlobal { name, version });
+        true
+    }
+
+    /// Removes only the seat matching the registry name.
+    fn remove(&mut self, name: u32) -> bool {
+        let previous_len = self.seats.len();
+        self.seats.retain(|seat| seat.name != name);
+        self.seats.len() != previous_len
+    }
+
+    /// Returns the first currently advertised seat.
+    fn preferred(&self) -> Option<SeatGlobal> {
+        self.seats.first().copied()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CapabilityChange {
     Added,
     Removed,
@@ -653,13 +688,91 @@ impl Dispatch<xdg_toplevel::XdgToplevel, ()> for WindowState {
 #[cfg(test)]
 mod tests {
     use super::{
-        CapabilityChange, KeyboardLifecycle, accepts_keyboard_proxy_event, checked_buffer_layout,
+        CapabilityChange, KeyboardLifecycle, SeatGlobal, SeatRegistry,
+        accepts_keyboard_proxy_event, checked_buffer_layout,
         has_keyboard_capability, supports_xkb_keymap,
     };
     use crate::keyboard::KeyRepeat;
     use std::time::{Duration, Instant};
     use wayland_client::WEnum;
     use wayland_client::protocol::{wl_keyboard, wl_seat};
+
+    #[test]
+    fn registers_first_seat() {
+        let mut registry = SeatRegistry::default();
+
+        assert!(registry.register(7, 9));
+        assert_eq!(
+            registry.preferred(),
+            Some(SeatGlobal { name: 7, version: 9 })
+        );
+    }
+
+    #[test]
+    fn ignores_duplicate_seat_global() {
+        let mut registry = SeatRegistry::default();
+
+        assert!(registry.register(7, 9));
+        assert!(!registry.register(7, 5));
+
+        assert_eq!(
+            registry.seats,
+            vec![SeatGlobal { name: 7, version: 9 }]
+        );
+    }
+
+    #[test]
+    fn removes_only_matching_seat() {
+        let mut registry = SeatRegistry::default();
+
+        registry.register(7, 9);
+        registry.register(12, 8);
+
+        assert!(!registry.remove(99));
+        assert_eq!(
+            registry.preferred(),
+            Some(SeatGlobal { name: 7, version: 9 })
+        );
+        assert_eq!(registry.seats.len(), 2);
+    }
+
+    #[test]
+    fn removes_active_seat() {
+        let mut registry = SeatRegistry::default();
+
+        registry.register(7, 9);
+
+        assert!(registry.remove(7));
+        assert_eq!(registry.preferred(), None);
+    }
+
+    #[test]
+    fn selects_remaining_seat() {
+        let mut registry = SeatRegistry::default();
+
+        registry.register(7, 9);
+        registry.register(12, 8);
+
+        assert!(registry.remove(7));
+        assert_eq!(
+            registry.preferred(),
+            Some(SeatGlobal { name: 12, version: 8 })
+        );
+    }
+
+    #[test]
+    fn allows_seat_reannouncement() {
+        let mut registry = SeatRegistry::default();
+
+        assert!(registry.register(7, 9));
+        assert!(registry.remove(7));
+        assert!(registry.register(7, 8));
+
+        assert_eq!(
+            registry.preferred(),
+            Some(SeatGlobal { name: 7, version: 8 })
+        );
+    }
 
     #[test]
     fn computes_checked_shm_layout() {
