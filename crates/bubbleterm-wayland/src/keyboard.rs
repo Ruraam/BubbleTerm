@@ -523,6 +523,65 @@ mod tests {
     }
 
     #[test]
+    fn shift_and_altgr_snapshot_selects_the_combined_level() {
+        let mut keyboard = keyboard_with_layouts("de");
+        let keymap = keyboard
+            .keymap
+            .as_ref()
+            .expect("keymap should be installed");
+        let shift = keymap.mod_get_index("Shift");
+        let mod5 = keymap.mod_get_index("Mod5");
+        assert_ne!(shift, xkb::MOD_INVALID);
+        assert_ne!(mod5, xkb::MOD_INVALID);
+
+        let combined_mask = (1_u32 << shift) | (1_u32 << mod5);
+        keyboard.update_modifiers(combined_mask, 0, 0, 0);
+
+        // Shift must not cancel AltGr: German AltGr+Shift+E remains Euro.
+        assert_eq!(keyboard.translate(18, false), Some("€".as_bytes().to_vec()));
+    }
+
+    #[test]
+    fn changing_group_reinterprets_an_active_altgr_snapshot() {
+        let mut keyboard = keyboard_with_layouts("us,de");
+        let keymap = keyboard
+            .keymap
+            .as_ref()
+            .expect("keymap should be installed");
+        let mod5 = keymap.mod_get_index("Mod5");
+        assert_ne!(mod5, xkb::MOD_INVALID);
+        let altgr_mask = 1_u32 << mod5;
+
+        keyboard.update_modifiers(altgr_mask, 0, 0, 1);
+        assert_eq!(keyboard.translate(18, false), Some("€".as_bytes().to_vec()));
+
+        // The compositor's next snapshot changes only the group; AltGr stays active.
+        keyboard.update_modifiers(altgr_mask, 0, 0, 0);
+        assert_eq!(keyboard.translate(18, false), Some(b"e".to_vec()));
+    }
+
+    #[test]
+    fn focus_reset_clears_shift_altgr_and_locked_modifier_state() {
+        let mut keyboard = keyboard_with_layouts("de");
+        let keymap = keyboard
+            .keymap
+            .as_ref()
+            .expect("keymap should be installed");
+        let shift = keymap.mod_get_index("Shift");
+        let mod5 = keymap.mod_get_index("Mod5");
+        assert_ne!(shift, xkb::MOD_INVALID);
+        assert_ne!(mod5, xkb::MOD_INVALID);
+
+        let combined_mask = (1_u32 << shift) | (1_u32 << mod5);
+        keyboard.update_modifiers(combined_mask, 0, 0, 0);
+        assert_eq!(keyboard.translate(18, false), Some("€".as_bytes().to_vec()));
+
+        keyboard.clear_modifiers();
+
+        assert_eq!(keyboard.translate(18, false), Some(b"e".to_vec()));
+    }
+
+    #[test]
     fn replacing_keymap_resets_partial_compose_and_uses_new_layout() {
         let mut keyboard = keyboard_with_compose_table(TEST_COMPOSE_TABLE);
         install_test_keymap(&mut keyboard, "us");
