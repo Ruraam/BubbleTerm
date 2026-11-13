@@ -675,7 +675,10 @@ mod tests {
         }
 
         let status = session.wait().expect("wait should reap the killed leader");
-        assert!(!status.success(), "killed child unexpectedly reported success");
+        assert!(
+            !status.success(),
+            "killed child unexpectedly reported success"
+        );
         let _ = fs::remove_file(pid_file);
     }
 
