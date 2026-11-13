@@ -108,7 +108,7 @@ impl PtySession {
 
         // Only mark the group terminated after SIGKILL succeeds or the group
         // is already gone (ESRCH). Other errors must remain observable.
-        Self::signal_process_group(process_group, nix::sys::signal::Signal::SIGKILL)?;
+        Self::send_signal(process_group, nix::sys::signal::Signal::SIGKILL)?;
         self.process_group_terminated = true;
         Ok(())
     }
