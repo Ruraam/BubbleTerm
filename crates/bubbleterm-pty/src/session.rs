@@ -20,10 +20,26 @@ pub struct PtySession {
 
 impl Drop for PtySession {
     fn drop(&mut self) {
-        // Closing a window or unwinding after a Wayland error must not leave
-        // the interactive shell running without its terminal frontend.
-        // kill() may fail when the child has already exited; wait() still
-        // reaps it and prevents a zombie process.
+        // portable-pty starts the command as a session and process-group
+        // leader. Signal that whole group so ordinary background children
+        // (which inherit the shell's process group) do not outlive the UI.
+        // Do not signal after the leader has exited: its PID could otherwise
+        // have been reused after it was reaped elsewhere.
+        #[cfg(unix)]
+        if let Some(pid) = self
+            .child
+            .process_id()
+            .and_then(|pid| i32::try_from(pid).ok())
+            && self.child.try_wait().ok().flatten().is_none()
+        {
+            let _ = nix::sys::signal::kill(
+                nix::unistd::Pid::from_raw(-pid),
+                nix::sys::signal::Signal::SIGHUP,
+            );
+        }
+
+        // Also use portable-pty's child API to guarantee the direct child is
+        // terminated and reaped, even if group signaling was unavailable.
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
@@ -227,6 +243,94 @@ mod tests {
 
         session.kill().expect("test child should be terminated");
         let _ = session.wait();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn dropping_session_terminates_background_process_group_members() {
+        use std::{
+            fs,
+            thread,
+            time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+        };
+
+        let pid_file = std::env::temp_dir().join(format!(
+            "bubbleterm-descendant-{}-{}.pid",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system clock should be after Unix epoch")
+                .as_nanos()
+        ));
+        let spec = LaunchSpec {
+            shell: "/bin/sh".into(),
+            args: vec![
+                "-c".into(),
+                "sleep 30 & child=$!; printf '%s\\n' \"$child\" > \"$BUBBLETERM_TEST_CHILD_PID_FILE\"; wait".into(),
+            ],
+            working_directory: None,
+            environment: [(
+                "BUBBLETERM_TEST_CHILD_PID_FILE".to_owned(),
+                pid_file.to_string_lossy().into_owned(),
+            )]
+            .into_iter()
+            .collect(),
+            kind: ShellKind::Host,
+        };
+        let session = PtySession::spawn(
+            &spec,
+            PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            },
+        )
+        .expect("PTY shell should spawn");
+
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let child_pid = loop {
+            if let Ok(contents) = fs::read_to_string(&pid_file) {
+                if let Ok(pid) = contents.trim().parse::<u32>() {
+                    break pid;
+                }
+            }
+            assert!(
+                Instant::now() < deadline,
+                "background child did not publish its PID"
+            );
+            thread::sleep(Duration::from_millis(10));
+        };
+
+        drop(session);
+
+        // A killed process may briefly remain as a zombie until its new
+        // parent reaps it. Both absence and zombie state mean it is no longer
+        // executing; a live state would indicate a leaked descendant.
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let stat_path = format!("/proc/{child_pid}/stat");
+            match fs::read_to_string(&stat_path) {
+                Ok(stat) => {
+                    let state = stat
+                        .rsplit_once(')')
+                        .and_then(|(_, fields)| fields.split_whitespace().next())
+                        .and_then(|field| field.chars().next());
+                    if state == Some('Z') {
+                        break;
+                    }
+                    assert!(
+                        Instant::now() < deadline,
+                        "background process {child_pid} survived PtySession drop (state: {state:?})"
+                    );
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+                Err(error) => panic!("could not inspect background process: {error}"),
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        let _ = fs::remove_file(pid_file);
     }
 
     #[test]
