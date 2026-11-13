@@ -131,8 +131,16 @@ pub fn run_wayland_window(session: PtySession, cell_metrics: CellMetrics) -> Res
             continue;
         };
         let mut poll_fds = [PollFd::new(read_guard.connection_fd(), PollFlags::POLLIN)];
-        let poll_result =
-            poll(&mut poll_fds, 8_u16).context("could not poll the Wayland connection")?;
+        let poll_result = match poll(&mut poll_fds, 8_u16) {
+            Ok(result) => result,
+            // A signal may interrupt poll without indicating a broken
+            // Wayland connection. Dropping the read guard cancels this
+            // prepared read; the next loop iteration retries cleanly.
+            Err(nix::errno::Errno::EINTR) => continue,
+            Err(error) => {
+                return Err(error).context("could not poll the Wayland connection");
+            }
+        };
         let revents = poll_fds[0].revents().unwrap_or_else(PollFlags::empty);
         if revents.contains(PollFlags::POLLNVAL) {
             bail!("Wayland connection file descriptor became invalid while polling");
