@@ -169,9 +169,9 @@ fn read_loop_unix(
         // Re-register after each read so data that remained readable during
         // that backpressure is reported again instead of leaving the worker
         // asleep waiting for a new readiness edge.
-        if let Err(error) =
-            poll.registry()
-                .reregister(&mut source, Token(0), Interest::READABLE)
+        if let Err(error) = poll
+            .registry()
+            .reregister(&mut source, Token(0), Interest::READABLE)
         {
             let _ = sender.send(PtyOutputEvent::Error(error.to_string()));
             break;
