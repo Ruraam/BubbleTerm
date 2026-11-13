@@ -419,6 +419,47 @@ mod tests {
         );
         drop(session);
     }
+    #[cfg(unix)]
+    #[test]
+    fn dropping_session_before_reader_unblocks_a_backpressured_worker() {
+        const ITERATIONS: usize = 4;
+
+        for iteration in 0..ITERATIONS {
+            let spec = LaunchSpec {
+                shell: "/bin/sh".into(),
+                args: vec!["-c".into(), "exec yes bubbleterm".into()],
+                working_directory: None,
+                environment: Default::default(),
+                kind: ShellKind::Host,
+            };
+            let session = PtySession::spawn(
+                &spec,
+                PtySize {
+                    rows: 24,
+                    cols: 80,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                },
+            )
+            .expect("PTY should spawn");
+            let output = PtyOutputReader::spawn(&session).expect("output reader should start");
+
+            // Let the producer fill the bounded channel and block on send.
+            std::thread::sleep(Duration::from_millis(100));
+
+            let started = std::time::Instant::now();
+            drop(session);
+            // Closing the receiver must release a worker that was blocked
+            // sending output while the session was being torn down.
+            drop(output);
+
+            assert!(
+                started.elapsed() < Duration::from_secs(2),
+                "session/reader teardown deadlocked on iteration {iteration}"
+            );
+        }
+    }
+
     #[test]
     fn receives_child_output_off_the_caller_thread() {
         let spec = LaunchSpec {
