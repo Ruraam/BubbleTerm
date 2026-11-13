@@ -397,7 +397,8 @@ mod tests {
             PtySize {
                 rows: 24,
                 cols: 80,
-                pixel_width: 0,                pixel_height: 0,
+                pixel_width: 0,
+                pixel_height: 0,
             },
         )
         .expect("PTY should spawn");
