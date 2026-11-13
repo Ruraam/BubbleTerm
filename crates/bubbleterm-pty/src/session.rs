@@ -47,7 +47,7 @@ impl PtySession {
     /// Observe child termination without reaping it, keeping its PID reserved
     /// until its process group has been signaled.
     fn observe_child_exit(&self, blocking: bool) -> std::io::Result<bool> {
-        use nix::sys::wait::{waitid, Id, WaitPidFlag, WaitStatus};
+        use nix::sys::wait::{Id, WaitPidFlag, WaitStatus, waitid};
 
         let pid = self
             .child
@@ -521,10 +521,17 @@ mod tests {
 
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
-            if session.try_wait().expect("try_wait should observe child exit").is_some() {
+            if session
+                .try_wait()
+                .expect("try_wait should observe child exit")
+                .is_some()
+            {
                 break;
             }
-            assert!(Instant::now() < deadline, "PTY leader did not exit naturally");
+            assert!(
+                Instant::now() < deadline,
+                "PTY leader did not exit naturally"
+            );
             thread::sleep(Duration::from_millis(10));
         }
 
