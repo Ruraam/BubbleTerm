@@ -129,8 +129,12 @@ impl Drop for PtySession {
                     Ok(_) => self.terminate_process_group().is_err(),
                     Err(_) => true,
                 };
-                if group_termination_failed {
-                    let _ = self.child.kill();
+                if group_termination_failed && self.child.kill().is_err() {
+                    // Do not block Drop indefinitely when the fallback signal
+                    // also fails. The child handle is released with the session;
+                    // callers that need observable cleanup errors must use
+                    // kill() or wait() before dropping the session.
+                    return;
                 }
             }
             let _ = self.child.wait();
