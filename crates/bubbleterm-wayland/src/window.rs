@@ -1178,10 +1178,7 @@ mod tests {
 
         // The replacement seat has already advertised a keyboard and
         // received focus before an old seat's queued event is dispatched.
-        assert_eq!(
-            lifecycle.update_capability(true),
-            CapabilityChange::Added
-        );
+        assert_eq!(lifecycle.update_capability(true), CapabilityChange::Added);
         assert!(lifecycle.enter());
         assert!(lifecycle.accepts_input());
 
