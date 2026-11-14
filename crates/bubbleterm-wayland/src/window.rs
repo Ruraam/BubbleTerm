@@ -1187,10 +1187,7 @@ mod tests {
 
         // A delayed capability revocation from the removed seat must not
         // clear the replacement's availability or focus.
-        if accepts_active_seat_proxy_event(
-            Some(&replacement_proxy_id),
-            &old_proxy_id,
-        ) {
+        if accepts_active_seat_proxy_event(Some(&replacement_proxy_id), &old_proxy_id) {
             lifecycle.update_capability(false);
         }
 
@@ -1199,10 +1196,7 @@ mod tests {
         assert!(lifecycle.accepts_input());
 
         // Nor may a stale positive event mutate the active seat's state.
-        if accepts_active_seat_proxy_event(
-            Some(&replacement_proxy_id),
-            &old_proxy_id,
-        ) {
+        if accepts_active_seat_proxy_event(Some(&replacement_proxy_id), &old_proxy_id) {
             lifecycle.update_capability(true);
         }
 
