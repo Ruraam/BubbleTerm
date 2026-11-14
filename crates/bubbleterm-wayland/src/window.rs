@@ -1173,6 +1173,54 @@ mod tests {
     }
 
     #[test]
+    fn seat_removal_discards_focused_keyboard_and_repeat_state() {
+        let now = Instant::now();
+        let mut registry = SeatRegistry::default();
+        let old_seat_proxy_id = 10_u32;
+        let replacement_seat_proxy_id = 11_u32;
+        let mut lifecycle = KeyboardLifecycle::default();
+        let mut repeat = KeyRepeat::default();
+
+        assert!(registry.register(7, 9));
+        assert_eq!(registry.preferred().map(|seat| seat.name), Some(7));
+        assert_eq!(lifecycle.update_capability(true), CapabilityChange::Added);
+        assert!(lifecycle.enter());
+        repeat.configure(30, 250, now);
+        repeat.press(42, true, now);
+        assert!(lifecycle.accepts_input());
+
+        // Removing the active wl_seat runs destroy_active_seat, which also
+        // destroys its keyboard and resets focus, keymap state, and repeat.
+        assert!(registry.remove(7));
+        lifecycle = KeyboardLifecycle::default();
+        repeat.clear();
+
+        assert_eq!(registry.preferred(), None);
+        assert!(!lifecycle.accepts_input());
+        assert_eq!(repeat.take_due(now + Duration::from_secs(2)), None);
+        assert!(!accepts_active_seat_proxy_event(None, &old_seat_proxy_id));
+
+        // Re-announcing a seat creates a new proxy, but it starts without a
+        // keyboard or focus. A fresh capability and Enter are both required.
+        assert!(registry.register(7, 9));
+        assert_eq!(registry.preferred().map(|seat| seat.name), Some(7));
+        assert!(!accepts_active_seat_proxy_event(
+            Some(&replacement_seat_proxy_id),
+            &old_seat_proxy_id,
+        ));
+        assert!(accepts_active_seat_proxy_event(
+            Some(&replacement_seat_proxy_id),
+            &replacement_seat_proxy_id,
+        ));
+        assert!(!lifecycle.accepts_input());
+        assert_eq!(lifecycle.update_capability(true), CapabilityChange::Added);
+        assert!(!lifecycle.accepts_input());
+        assert!(lifecycle.enter());
+        assert!(lifecycle.accepts_input());
+        assert_eq!(repeat.take_due(now + Duration::from_secs(3)), None);
+    }
+
+    #[test]
     fn stale_seat_events_are_rejected_after_global_replacement() {
         let old_proxy_id = 10_u32;
         let new_proxy_id = 11_u32;
