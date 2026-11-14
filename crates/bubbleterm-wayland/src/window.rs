@@ -1011,6 +1011,36 @@ mod tests {
     }
 
     #[test]
+    fn reused_registry_name_does_not_revalidate_the_old_seat_proxy() {
+        let mut registry = SeatRegistry::default();
+        let old_proxy_id = 10_u32;
+        let replacement_proxy_id = 11_u32;
+
+        // The compositor may reuse the numeric registry name after removal.
+        assert!(registry.register(7, 9));
+        assert!(registry.remove(7));
+        assert!(registry.register(7, 8));
+        assert_eq!(
+            registry.preferred(),
+            Some(SeatGlobal {
+                name: 7,
+                version: 8,
+            })
+        );
+
+        // Registry names identify advertised globals, not client-side proxy
+        // instances. Queued events from the old proxy must still be rejected.
+        assert!(!accepts_active_seat_proxy_event(
+            Some(&replacement_proxy_id),
+            &old_proxy_id,
+        ));
+        assert!(accepts_active_seat_proxy_event(
+            Some(&replacement_proxy_id),
+            &replacement_proxy_id,
+        ));
+    }
+
+    #[test]
     fn rejects_missing_and_unknown_keymap_formats() {
         assert!(supports_xkb_keymap(WEnum::Value(
             wl_keyboard::KeymapFormat::XkbV1
