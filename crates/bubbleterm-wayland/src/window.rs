@@ -887,6 +887,57 @@ mod tests {
     }
 
     #[test]
+    fn active_seat_removal_and_reannouncement_preserve_proxy_identity() {
+        let mut registry = SeatRegistry::default();
+        let old_proxy_id = 10_u32;
+        let secondary_proxy_id = 11_u32;
+        let reannounced_proxy_id = 12_u32;
+
+        assert!(registry.register(7, 9));
+        assert!(registry.register(12, 8));
+        let active = registry.preferred().expect("first seat is active");
+        assert_eq!(active.name, 7);
+
+        // Removing the active global selects the still-advertised secondary.
+        assert!(registry.remove(active.name));
+        let replacement = registry
+            .preferred()
+            .expect("secondary seat becomes preferred");
+        assert_eq!(replacement.name, 12);
+        assert!(!accepts_active_seat_proxy_event(
+            Some(&secondary_proxy_id),
+            &old_proxy_id,
+        ));
+        assert!(accepts_active_seat_proxy_event(
+            Some(&secondary_proxy_id),
+            &secondary_proxy_id,
+        ));
+
+        // Once every seat is gone, a reannouncement is eligible again and
+        // carries the newly advertised protocol version.
+        assert!(registry.remove(replacement.name));
+        assert_eq!(registry.preferred(), None);
+        assert!(registry.register(7, 6));
+        assert_eq!(
+            registry.preferred(),
+            Some(SeatGlobal {
+                name: 7,
+                version: 6,
+            })
+        );
+
+        // Reusing the registry name does not make the old proxy current.
+        assert!(!accepts_active_seat_proxy_event(
+            Some(&reannounced_proxy_id),
+            &old_proxy_id,
+        ));
+        assert!(accepts_active_seat_proxy_event(
+            Some(&reannounced_proxy_id),
+            &reannounced_proxy_id,
+        ));
+    }
+
+    #[test]
     fn allows_seat_reannouncement() {
         let mut registry = SeatRegistry::default();
 
