@@ -927,10 +927,7 @@ mod tests {
         // events, even if its queued events are dispatched afterward.
         assert!(registry.remove(18));
         assert_eq!(registry.preferred(), None);
-        assert!(!accepts_active_seat_proxy_event(
-            None,
-            &third_proxy_id,
-        ));
+        assert!(!accepts_active_seat_proxy_event(None, &third_proxy_id,));
     }
 
     #[test]
