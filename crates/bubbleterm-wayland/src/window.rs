@@ -524,6 +524,11 @@ fn accepts_keyboard_proxy_event<T: PartialEq>(
     available && active_id.is_some_and(|active_id| active_id == event_id)
 }
 
+/// Accept seat events only from the currently active registry global proxy.
+fn accepts_active_seat_proxy_event<T: PartialEq>(active_id: Option<&T>, event_id: &T) -> bool {
+    active_id.is_some_and(|active_id| active_id == event_id)
+}
+
 fn supports_xkb_keymap(format: WEnum<wl_keyboard::KeymapFormat>) -> bool {
     format == WEnum::Value(wl_keyboard::KeymapFormat::XkbV1)
 }
@@ -544,6 +549,14 @@ impl Dispatch<wl_seat::WlSeat, ()> for WindowState {
         _: &Connection,
         queue_handle: &QueueHandle<Self>,
     ) {
+        // A removed seat may still have queued events. Never let its
+        // capabilities change the keyboard state of a replacement seat.
+        let active_id = state.seat.as_ref().map(|(_, active)| active.id());
+        let event_id = seat.id();
+        if !accepts_active_seat_proxy_event(active_id.as_ref(), &event_id) {
+            return;
+        }
+
         if let wl_seat::Event::Capabilities { capabilities } = event {
             match state
                 .keyboard_lifecycle
@@ -755,8 +768,8 @@ impl Dispatch<xdg_toplevel::XdgToplevel, ()> for WindowState {
 mod tests {
     use super::{
         CapabilityChange, KeyboardLifecycle, SeatGlobal, SeatRegistry,
-        accepts_keyboard_proxy_event, checked_buffer_layout, has_keyboard_capability,
-        supports_xkb_keymap,
+        accepts_active_seat_proxy_event, accepts_keyboard_proxy_event, checked_buffer_layout,
+        has_keyboard_capability, supports_xkb_keymap,
     };
     use crate::keyboard::KeyRepeat;
     use std::time::{Duration, Instant};
@@ -979,6 +992,22 @@ mod tests {
             &new_proxy_id,
         ));
         assert!(lifecycle.accepts_input());
+    }
+
+    #[test]
+    fn stale_seat_events_are_rejected_after_global_replacement() {
+        let old_proxy_id = 10_u32;
+        let new_proxy_id = 11_u32;
+
+        assert!(!accepts_active_seat_proxy_event(
+            Some(&new_proxy_id),
+            &old_proxy_id,
+        ));
+        assert!(!accepts_active_seat_proxy_event(None, &old_proxy_id));
+        assert!(accepts_active_seat_proxy_event(
+            Some(&new_proxy_id),
+            &new_proxy_id,
+        ));
     }
 
     #[test]
