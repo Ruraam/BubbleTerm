@@ -1055,10 +1055,7 @@ mod tests {
 
         // A delayed Capabilities event from the removed seat is rejected
         // before it can update lifecycle state or create a keyboard proxy.
-        if accepts_active_seat_proxy_event(
-            Some(&replacement_proxy_id),
-            &old_proxy_id,
-        ) {
+        if accepts_active_seat_proxy_event(Some(&replacement_proxy_id), &old_proxy_id) {
             lifecycle.update_capability(true);
         }
 
@@ -1066,14 +1063,8 @@ mod tests {
         assert!(!lifecycle.accepts_input());
 
         // The replacement's own Capabilities event is still accepted.
-        if accepts_active_seat_proxy_event(
-            Some(&replacement_proxy_id),
-            &replacement_proxy_id,
-        ) {
-            assert_eq!(
-                lifecycle.update_capability(true),
-                CapabilityChange::Added
-            );
+        if accepts_active_seat_proxy_event(Some(&replacement_proxy_id), &replacement_proxy_id) {
+            assert_eq!(lifecycle.update_capability(true), CapabilityChange::Added);
         }
         assert!(lifecycle.available);
         assert!(!lifecycle.accepts_input());
