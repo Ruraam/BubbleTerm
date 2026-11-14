@@ -1125,6 +1125,63 @@ mod tests {
     }
 
     #[test]
+    fn stale_keymap_and_repeat_info_cannot_mutate_reconnected_keyboard() {
+        let now = Instant::now();
+        let old_proxy_id = 10_u32;
+        let replacement_proxy_id = 11_u32;
+        let mut lifecycle = KeyboardLifecycle::default();
+        let mut repeat = KeyRepeat::default();
+
+        lifecycle.update_capability(true);
+        assert!(lifecycle.enter());
+        assert_eq!(
+            lifecycle.update_capability(false),
+            CapabilityChange::Removed
+        );
+        assert_eq!(
+            lifecycle.update_capability(true),
+            CapabilityChange::Added
+        );
+        assert!(lifecycle.enter());
+
+        // A delayed Keymap from the previous proxy must not clear a key
+        // currently repeating on the replacement keyboard.
+        repeat.configure(20, 250, now);
+        repeat.press(42, true, now);
+        if accepts_keyboard_proxy_event(
+            lifecycle.available,
+            Some(&replacement_proxy_id),
+            &old_proxy_id,
+        ) {
+            repeat.clear();
+        }
+        assert_eq!(
+            repeat.take_due(now + Duration::from_millis(250)),
+            Some(42)
+        );
+
+        // A delayed RepeatInfo must not replace the new proxy's repeat
+        // configuration or postpone its already scheduled repeat.
+        repeat.press(43, true, now + Duration::from_millis(250));
+        if accepts_keyboard_proxy_event(
+            lifecycle.available,
+            Some(&replacement_proxy_id),
+            &old_proxy_id,
+        ) {
+            repeat.configure(1, 5_000, now + Duration::from_millis(250));
+        }
+        assert_eq!(
+            repeat.take_due(now + Duration::from_millis(500)),
+            Some(43)
+        );
+        assert!(accepts_keyboard_proxy_event(
+            lifecycle.available,
+            Some(&replacement_proxy_id),
+            &replacement_proxy_id,
+        ));
+    }
+
+    #[test]
     fn stale_seat_events_are_rejected_after_global_replacement() {
         let old_proxy_id = 10_u32;
         let new_proxy_id = 11_u32;
