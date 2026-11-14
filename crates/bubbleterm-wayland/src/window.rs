@@ -1041,6 +1041,45 @@ mod tests {
     }
 
     #[test]
+    fn stale_seat_capabilities_cannot_create_a_keyboard_for_the_replacement() {
+        let old_proxy_id = 10_u32;
+        let replacement_proxy_id = 11_u32;
+        let mut lifecycle = KeyboardLifecycle::default();
+
+        // The replacement seat is active but has not advertised capabilities.
+        assert!(!lifecycle.available);
+        assert!(accepts_active_seat_proxy_event(
+            Some(&replacement_proxy_id),
+            &replacement_proxy_id,
+        ));
+
+        // A delayed Capabilities event from the removed seat is rejected
+        // before it can update lifecycle state or create a keyboard proxy.
+        if accepts_active_seat_proxy_event(
+            Some(&replacement_proxy_id),
+            &old_proxy_id,
+        ) {
+            lifecycle.update_capability(true);
+        }
+
+        assert!(!lifecycle.available);
+        assert!(!lifecycle.accepts_input());
+
+        // The replacement's own Capabilities event is still accepted.
+        if accepts_active_seat_proxy_event(
+            Some(&replacement_proxy_id),
+            &replacement_proxy_id,
+        ) {
+            assert_eq!(
+                lifecycle.update_capability(true),
+                CapabilityChange::Added
+            );
+        }
+        assert!(lifecycle.available);
+        assert!(!lifecycle.accepts_input());
+    }
+
+    #[test]
     fn reused_registry_name_does_not_revalidate_the_old_seat_proxy() {
         let mut registry = SeatRegistry::default();
         let old_proxy_id = 10_u32;
