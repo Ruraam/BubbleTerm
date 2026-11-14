@@ -462,7 +462,7 @@ enum CapabilityChange {
     Unchanged,
 }
 
-fn destroy_active_seat(state: &mut WindowState) {
+fn destroy_active_keyboard(state: &mut WindowState) {
     if let Some(keyboard) = state.keyboard.take()
         && keyboard.version() >= 3
     {
@@ -472,6 +472,10 @@ fn destroy_active_seat(state: &mut WindowState) {
     state.xkb.clear_keymap();
     state.xkb.clear_modifiers();
     state.key_repeat.clear();
+}
+
+fn destroy_active_seat(state: &mut WindowState) {
+    destroy_active_keyboard(state);
 
     if let Some((_, seat)) = state.seat.take()
         && seat.version() >= 5
@@ -566,9 +570,10 @@ impl Dispatch<wl_seat::WlSeat, ()> for WindowState {
                     state.keyboard = Some(seat.get_keyboard(queue_handle, ()));
                 }
                 CapabilityChange::Removed => {
-                    state.keyboard = None;
-                    state.xkb.clear_keymap();
-                    state.key_repeat.clear();
+                    // The compositor revoked this keyboard. Release its
+                    // protocol object and clear all state before a later
+                    // capability re-add creates a fresh proxy.
+                    destroy_active_keyboard(state);
                 }
                 CapabilityChange::Unchanged => {}
             }
