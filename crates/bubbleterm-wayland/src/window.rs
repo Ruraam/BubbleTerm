@@ -1125,6 +1125,41 @@ mod tests {
     }
 
     #[test]
+    fn removed_seat_keyboard_events_cannot_mutate_a_new_active_keyboard() {
+        let old_keyboard_id = 10_u32;
+        let new_keyboard_id = 11_u32;
+        let mut lifecycle = KeyboardLifecycle::default();
+
+        // The old seat is gone. A newly announced seat owns this keyboard
+        // and has completed its capability and focus handshake.
+        assert_eq!(lifecycle.update_capability(true), CapabilityChange::Added);
+        assert!(lifecycle.enter());
+        assert!(lifecycle.accepts_input());
+
+        // Every queued event from the removed seat's keyboard is rejected by
+        // the same pre-dispatch identity gate, regardless of event variant.
+        for event_name in ["Enter", "Leave", "Key", "Keymap", "Modifiers", "RepeatInfo"] {
+            assert!(
+                !accepts_keyboard_proxy_event(
+                    lifecycle.available,
+                    Some(&new_keyboard_id),
+                    &old_keyboard_id,
+                ),
+                "stale {event_name} event was unexpectedly accepted",
+            );
+        }
+
+        // The replacement keyboard remains the only event source accepted,
+        // and stale events cannot disturb its focused input state.
+        assert!(accepts_keyboard_proxy_event(
+            lifecycle.available,
+            Some(&new_keyboard_id),
+            &new_keyboard_id,
+        ));
+        assert!(lifecycle.accepts_input());
+    }
+
+    #[test]
     fn stale_keymap_and_repeat_info_cannot_mutate_reconnected_keyboard() {
         let now = Instant::now();
         let old_proxy_id = 10_u32;
