@@ -463,18 +463,20 @@ enum CapabilityChange {
 }
 
 fn destroy_active_seat(state: &mut WindowState) {
-    if let Some(keyboard) = state.keyboard.take() {
-        if keyboard.version() >= 3 {
-            keyboard.release();
+    if let Some(keyboard) = state.keyboard.take()
+        && keyboard.version() >= 3
+    {
+        keyboard.release();
     }
     state.keyboard_lifecycle = KeyboardLifecycle::default();
     state.xkb.clear_keymap();
     state.xkb.clear_modifiers();
     state.key_repeat.clear();
 
-    if let Some((_, seat)) = state.seat.take() {
-        if seat.version() >= 5 {
-            seat.release();
+    if let Some((_, seat)) = state.seat.take()
+        && seat.version() >= 5
+    {
+        seat.release();
     }
 }
 
