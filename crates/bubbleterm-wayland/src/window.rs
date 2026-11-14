@@ -1138,10 +1138,7 @@ mod tests {
             lifecycle.update_capability(false),
             CapabilityChange::Removed
         );
-        assert_eq!(
-            lifecycle.update_capability(true),
-            CapabilityChange::Added
-        );
+        assert_eq!(lifecycle.update_capability(true), CapabilityChange::Added);
         assert!(lifecycle.enter());
 
         // A delayed Keymap from the previous proxy must not clear a key
@@ -1155,10 +1152,7 @@ mod tests {
         ) {
             repeat.clear();
         }
-        assert_eq!(
-            repeat.take_due(now + Duration::from_millis(250)),
-            Some(42)
-        );
+        assert_eq!(repeat.take_due(now + Duration::from_millis(250)), Some(42));
 
         // A delayed RepeatInfo must not replace the new proxy's repeat
         // configuration or postpone its already scheduled repeat.
@@ -1170,10 +1164,7 @@ mod tests {
         ) {
             repeat.configure(1, 5_000, now + Duration::from_millis(250));
         }
-        assert_eq!(
-            repeat.take_due(now + Duration::from_millis(500)),
-            Some(43)
-        );
+        assert_eq!(repeat.take_due(now + Duration::from_millis(500)), Some(43));
         assert!(accepts_keyboard_proxy_event(
             lifecycle.available,
             Some(&replacement_proxy_id),
