@@ -1048,6 +1048,53 @@ mod tests {
     }
 
     #[test]
+    fn unexpected_focus_and_modifier_order_never_reuses_stale_state() {
+        let mut lifecycle = KeyboardLifecycle::default();
+        let mut modifier_snapshot = None;
+
+        // Modifiers arriving before the first Enter are ignored.
+        assert_eq!(lifecycle.update_capability(true), CapabilityChange::Added);
+        if lifecycle.accepts_input() {
+            modifier_snapshot = Some((1_u32, 0_u32, 0_u32, 0_u32));
+        }
+        assert_eq!(modifier_snapshot, None);
+        assert!(!lifecycle.accepts_input());
+
+        // Enter establishes focus; only then may a modifier snapshot apply.
+        assert!(lifecycle.enter());
+        if lifecycle.accepts_input() {
+            modifier_snapshot = Some((2, 0, 0, 0));
+        }
+        assert_eq!(modifier_snapshot, Some((2, 0, 0, 0)));
+
+        // The first Leave invalidates modifiers. A duplicate Leave is inert.
+        if lifecycle.leave() {
+            modifier_snapshot = None;
+        }
+        assert_eq!(modifier_snapshot, None);
+        assert!(!lifecycle.leave());
+        assert_eq!(modifier_snapshot, None);
+
+        // A delayed Enter after capability removal cannot restore focus.
+        assert_eq!(lifecycle.update_capability(false), CapabilityChange::Removed);
+        assert!(!lifecycle.enter());
+        assert!(!lifecycle.accepts_input());
+        assert_eq!(modifier_snapshot, None);
+
+        // Reconnection requires a fresh Enter before modifiers are accepted.
+        assert_eq!(lifecycle.update_capability(true), CapabilityChange::Added);
+        if lifecycle.accepts_input() {
+            modifier_snapshot = Some((3, 0, 0, 0));
+        }
+        assert_eq!(modifier_snapshot, None);
+        assert!(lifecycle.enter());
+        if lifecycle.accepts_input() {
+            modifier_snapshot = Some((4, 0, 0, 0));
+        }
+        assert_eq!(modifier_snapshot, Some((4, 0, 0, 0)));
+    }
+
+    #[test]
     fn input_is_accepted_only_while_keyboard_is_available_and_focused() {
         let mut lifecycle = KeyboardLifecycle::default();
         assert!(!lifecycle.accepts_input());
