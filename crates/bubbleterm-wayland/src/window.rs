@@ -887,6 +887,53 @@ mod tests {
     }
 
     #[test]
+    fn rapid_active_seat_removals_reject_every_superseded_proxy() {
+        let mut registry = SeatRegistry::default();
+        let first_proxy_id = 100_u32;
+        let second_proxy_id = 101_u32;
+        let third_proxy_id = 102_u32;
+
+        assert!(registry.register(7, 9));
+        assert!(registry.register(12, 8));
+        assert!(registry.register(18, 7));
+        assert_eq!(registry.preferred().map(|seat| seat.name), Some(7));
+
+        // First removal binds the second advertised seat.
+        assert!(registry.remove(7));
+        assert_eq!(registry.preferred().map(|seat| seat.name), Some(12));
+        assert!(!accepts_active_seat_proxy_event(
+            Some(&second_proxy_id),
+            &first_proxy_id,
+        ));
+
+        // The second seat is removed before its keyboard setup completes.
+        // The third seat becomes active and both earlier proxies are stale.
+        assert!(registry.remove(12));
+        assert_eq!(registry.preferred().map(|seat| seat.name), Some(18));
+        assert!(!accepts_active_seat_proxy_event(
+            Some(&third_proxy_id),
+            &first_proxy_id,
+        ));
+        assert!(!accepts_active_seat_proxy_event(
+            Some(&third_proxy_id),
+            &second_proxy_id,
+        ));
+        assert!(accepts_active_seat_proxy_event(
+            Some(&third_proxy_id),
+            &third_proxy_id,
+        ));
+
+        // Removing the final active seat leaves no proxy eligible to deliver
+        // events, even if its queued events are dispatched afterward.
+        assert!(registry.remove(18));
+        assert_eq!(registry.preferred(), None);
+        assert!(!accepts_active_seat_proxy_event(
+            None,
+            &third_proxy_id,
+        ));
+    }
+
+    #[test]
     fn active_seat_removal_and_reannouncement_preserve_proxy_identity() {
         let mut registry = SeatRegistry::default();
         let old_proxy_id = 10_u32;
