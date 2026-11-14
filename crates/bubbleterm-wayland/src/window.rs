@@ -1171,6 +1171,49 @@ mod tests {
     }
 
     #[test]
+    fn stale_seat_capabilities_cannot_revoke_a_replacement_keyboard() {
+        let old_proxy_id = 10_u32;
+        let replacement_proxy_id = 11_u32;
+        let mut lifecycle = KeyboardLifecycle::default();
+
+        // The replacement seat has already advertised a keyboard and
+        // received focus before an old seat's queued event is dispatched.
+        assert_eq!(
+            lifecycle.update_capability(true),
+            CapabilityChange::Added
+        );
+        assert!(lifecycle.enter());
+        assert!(lifecycle.accepts_input());
+
+        // A delayed capability revocation from the removed seat must not
+        // clear the replacement's availability or focus.
+        if accepts_active_seat_proxy_event(
+            Some(&replacement_proxy_id),
+            &old_proxy_id,
+        ) {
+            lifecycle.update_capability(false);
+        }
+
+        assert!(lifecycle.available);
+        assert!(lifecycle.focused);
+        assert!(lifecycle.accepts_input());
+
+        // Nor may a stale positive event mutate the active seat's state.
+        if accepts_active_seat_proxy_event(
+            Some(&replacement_proxy_id),
+            &old_proxy_id,
+        ) {
+            lifecycle.update_capability(true);
+        }
+
+        assert!(lifecycle.accepts_input());
+        assert!(accepts_active_seat_proxy_event(
+            Some(&replacement_proxy_id),
+            &replacement_proxy_id,
+        ));
+    }
+
+    #[test]
     fn reused_registry_name_does_not_revalidate_the_old_seat_proxy() {
         let mut registry = SeatRegistry::default();
         let old_proxy_id = 10_u32;
