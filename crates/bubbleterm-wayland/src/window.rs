@@ -852,6 +852,36 @@ mod tests {
     }
 
     #[test]
+    fn rapid_global_churn_keeps_only_the_next_advertised_seat_preferred() {
+        let mut registry = SeatRegistry::default();
+
+        assert!(registry.register(7, 9));
+        assert!(registry.register(12, 8));
+        assert!(registry.register(18, 7));
+        assert_eq!(registry.preferred().map(|seat| seat.name), Some(7));
+
+        // The active seat disappears; the next advertised seat is selected.
+        assert!(registry.remove(7));
+        assert_eq!(registry.preferred().map(|seat| seat.name), Some(12));
+
+        // A new seat arrives while the replacement is active. It must not
+        // jump ahead of the still-advertised seat.
+        assert!(registry.register(24, 6));
+        assert_eq!(registry.preferred().map(|seat| seat.name), Some(12));
+
+        // The replacement disappears before its keyboard is initialized.
+        assert!(registry.remove(12));
+        assert_eq!(registry.preferred().map(|seat| seat.name), Some(18));
+
+        assert!(registry.remove(18));
+        assert_eq!(registry.preferred().map(|seat| seat.name), Some(24));
+
+        assert!(registry.remove(24));
+        assert_eq!(registry.preferred(), None);
+        assert!(!registry.remove(12));
+    }
+
+    #[test]
     fn allows_seat_reannouncement() {
         let mut registry = SeatRegistry::default();
 
