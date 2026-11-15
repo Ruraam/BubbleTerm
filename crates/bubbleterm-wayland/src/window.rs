@@ -1076,7 +1076,10 @@ mod tests {
         assert_eq!(modifier_snapshot, None);
 
         // A delayed Enter after capability removal cannot restore focus.
-        assert_eq!(lifecycle.update_capability(false), CapabilityChange::Removed);
+        assert_eq!(
+            lifecycle.update_capability(false),
+            CapabilityChange::Removed
+        );
         assert!(!lifecycle.enter());
         assert!(!lifecycle.accepts_input());
         assert_eq!(modifier_snapshot, None);
