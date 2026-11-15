@@ -1589,6 +1589,50 @@ mod tests {
     }
 
     #[test]
+    fn key_events_after_leave_cannot_start_or_cancel_repeat() {
+        let now = Instant::now();
+        let mut lifecycle = KeyboardLifecycle::default();
+        let mut repeat = KeyRepeat::default();
+
+        lifecycle.update_capability(true);
+        assert!(lifecycle.enter());
+        repeat.configure(25, 300, now);
+        repeat.press(40, true, now);
+        assert_eq!(repeat.take_due(now + Duration::from_millis(300)), Some(40));
+
+        // Leave clears the held key. Queued Key press/release events arriving
+        // before the next Enter are ignored by the same input-focus gate.
+        assert!(lifecycle.leave());
+        repeat.clear();
+
+        if lifecycle.accepts_input() {
+            repeat.press(41, true, now + Duration::from_millis(400));
+        }
+        if lifecycle.accepts_input() {
+            repeat.release(40);
+        }
+        if lifecycle.accepts_input() {
+            repeat.release(41);
+        }
+        assert_eq!(repeat.take_due(now + Duration::from_secs(2)), None);
+
+        // A fresh focus and physical press establish the only repeatable key.
+        assert!(lifecycle.enter());
+        let fresh_press = now + Duration::from_secs(2);
+        if lifecycle.accepts_input() {
+            repeat.press(42, true, fresh_press);
+        }
+        assert_eq!(
+            repeat.take_due(fresh_press + Duration::from_millis(299)),
+            None
+        );
+        assert_eq!(
+            repeat.take_due(fresh_press + Duration::from_millis(300)),
+            Some(42)
+        );
+    }
+
+    #[test]
     fn detects_keyboard_capability_in_known_and_unknown_masks() {
         assert!(has_keyboard_capability(WEnum::Value(
             wl_seat::Capability::Keyboard
