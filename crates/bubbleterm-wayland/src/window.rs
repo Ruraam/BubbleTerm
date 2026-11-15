@@ -1548,6 +1548,47 @@ mod tests {
     }
 
     #[test]
+    fn late_repeat_info_after_focus_loss_only_configures_future_key_presses() {
+        let now = Instant::now();
+        let mut lifecycle = KeyboardLifecycle::default();
+        let mut repeat = KeyRepeat::default();
+
+        lifecycle.update_capability(true);
+        assert!(lifecycle.enter());
+        repeat.configure(30, 250, now);
+        repeat.press(30, true, now);
+        assert_eq!(repeat.take_due(now + Duration::from_millis(250)), Some(30));
+
+        // Leave clears the held key. A queued RepeatInfo may update settings,
+        // but must not resurrect the key that was held before focus loss.
+        assert!(lifecycle.leave());
+        repeat.clear();
+        repeat.configure(20, 100, now + Duration::from_millis(300));
+        assert!(lifecycle.enter());
+        assert_eq!(repeat.take_due(now + Duration::from_secs(2)), None);
+
+        // Only a new press after refocus may use the updated repeat settings.
+        let fresh_press = now + Duration::from_secs(2);
+        repeat.press(31, true, fresh_press);
+        assert_eq!(
+            repeat.take_due(fresh_press + Duration::from_millis(99)),
+            None
+        );
+        assert_eq!(
+            repeat.take_due(fresh_press + Duration::from_millis(100)),
+            Some(31)
+        );
+        assert_eq!(
+            repeat.take_due(fresh_press + Duration::from_millis(149)),
+            None
+        );
+        assert_eq!(
+            repeat.take_due(fresh_press + Duration::from_millis(150)),
+            Some(31)
+        );
+    }
+
+    #[test]
     fn detects_keyboard_capability_in_known_and_unknown_masks() {
         assert!(has_keyboard_capability(WEnum::Value(
             wl_seat::Capability::Keyboard
