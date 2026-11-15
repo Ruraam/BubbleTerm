@@ -773,6 +773,45 @@ mod tests {
     }
 
     #[test]
+    fn overlapping_key_presses_preserve_only_the_latest_repeatable_key() {
+        let start = Instant::now();
+        let mut repeat = KeyRepeat::default();
+        repeat.configure(20, 300, start);
+
+        // A repeatable key remains active while a modifier is pressed/released.
+        repeat.press(30, true, start);
+        repeat.press(42, false, start + Duration::from_millis(100));
+        repeat.release(42);
+        assert_eq!(
+            repeat.take_due(start + Duration::from_millis(300)),
+            Some(30)
+        );
+
+        // A newer repeatable key takes ownership; releasing the older key
+        // must not cancel it or resurrect the older repeat.
+        let newer_press = start + Duration::from_millis(350);
+        repeat.press(31, true, newer_press);
+        repeat.release(30);
+
+        assert_eq!(
+            repeat.take_due(newer_press + Duration::from_millis(299)),
+            None
+        );
+        assert_eq!(
+            repeat.take_due(newer_press + Duration::from_millis(300)),
+            Some(31)
+        );
+        assert_eq!(
+            repeat.take_due(newer_press + Duration::from_millis(350)),
+            Some(31)
+        );
+
+        // Releasing the currently repeating key stops repeat completely.
+        repeat.release(31);
+        assert_eq!(repeat.take_due(start + Duration::from_secs(2)), None);
+    }
+
+    #[test]
     fn reconfiguring_repeat_restarts_the_initial_delay() {
         let start = Instant::now();
         let reconfigured_at = start + Duration::from_millis(100);
