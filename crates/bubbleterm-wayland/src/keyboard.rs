@@ -842,6 +842,44 @@ mod tests {
     }
 
     #[test]
+    fn repeat_info_update_during_active_repeat_restarts_delay_and_rate() {
+        let start = Instant::now();
+        let mut repeat = KeyRepeat::default();
+        repeat.configure(20, 300, start);
+        repeat.press(30, true, start);
+
+        assert_eq!(
+            repeat.take_due(start + Duration::from_millis(300)),
+            Some(30)
+        );
+        assert_eq!(
+            repeat.take_due(start + Duration::from_millis(350)),
+            Some(30)
+        );
+
+        // A compositor update while the key is held applies a fresh initial
+        // delay, then schedules repeats using the newly advertised rate.
+        let updated_at = start + Duration::from_millis(400);
+        repeat.configure(10, 200, updated_at);
+        assert_eq!(
+            repeat.take_due(updated_at + Duration::from_millis(199)),
+            None
+        );
+        assert_eq!(
+            repeat.take_due(updated_at + Duration::from_millis(200)),
+            Some(30)
+        );
+        assert_eq!(
+            repeat.take_due(updated_at + Duration::from_millis(299)),
+            None
+        );
+        assert_eq!(
+            repeat.take_due(updated_at + Duration::from_millis(300)),
+            Some(30)
+        );
+    }
+
+    #[test]
     fn negative_repeat_rate_disables_and_clears_active_key() {
         let start = Instant::now();
         let mut repeat = KeyRepeat::default();
