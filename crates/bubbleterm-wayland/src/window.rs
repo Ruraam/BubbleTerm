@@ -1618,6 +1618,46 @@ mod tests {
     }
 
     #[test]
+    fn rapid_focus_switches_with_a_held_key_require_a_fresh_press() {
+        let now = Instant::now();
+        let mut lifecycle = KeyboardLifecycle::default();
+        let mut repeat = KeyRepeat::default();
+
+        lifecycle.update_capability(true);
+        assert!(lifecycle.enter());
+        repeat.configure(30, 400, now);
+        repeat.press(30, true, now);
+        assert_eq!(repeat.take_due(now + Duration::from_millis(400)), Some(30));
+
+        // The same physical key remains held while focus moves from window A
+        // to B. Leave clears repeat; Enter must not synthesize a new press.
+        assert!(lifecycle.leave());
+        repeat.clear();
+        assert!(lifecycle.enter());
+        assert_eq!(repeat.take_due(now + Duration::from_secs(2)), None);
+
+        // A second quick switch back to A must not resurrect the held key.
+        assert!(lifecycle.leave());
+        repeat.clear();
+        assert!(lifecycle.enter());
+        assert_eq!(repeat.take_due(now + Duration::from_secs(3)), None);
+
+        // Only a release followed by a fresh press in the focused window may
+        // start a new repeat sequence.
+        repeat.release(30);
+        let fresh_press = now + Duration::from_secs(3);
+        repeat.press(30, true, fresh_press);
+        assert_eq!(
+            repeat.take_due(fresh_press + Duration::from_millis(399)),
+            None
+        );
+        assert_eq!(
+            repeat.take_due(fresh_press + Duration::from_millis(400)),
+            Some(30)
+        );
+    }
+
+    #[test]
     fn keyboard_capability_removal_clears_repeat_across_reconnection() {
         let now = Instant::now();
         let mut lifecycle = KeyboardLifecycle::default();
