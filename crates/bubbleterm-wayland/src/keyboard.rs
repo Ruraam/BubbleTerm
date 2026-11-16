@@ -188,7 +188,7 @@ impl XkbKeyboard {
             &self.context,
             &"",
             &"",
-            layout,
+            &layout,
             &"",
             None,
             xkb::KEYMAP_COMPILE_NO_FLAGS,
@@ -197,6 +197,12 @@ impl XkbKeyboard {
         self.reset_compose();
         self.state = Some(State::new(&keymap));
         self.keymap = Some(keymap);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_modifier_mask(&self, name: &str) -> Option<u32> {
+        let index = self.keymap.as_ref()?.mod_get_index(name);
+        (index != xkb::MOD_INVALID).then_some(1_u32 << index)
     }
 
     /// Applies the modifier and layout snapshot sent by wl_keyboard.
