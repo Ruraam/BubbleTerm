@@ -849,7 +849,11 @@ mod tests {
             .as_ref()
             .expect("keymap should be installed");
         let shift_index = keymap.mod_get_index("Shift");
-        assert_ne!(shift_index, xkb::MOD_INVALID, "US keymap should define Shift");
+        assert_ne!(
+            shift_index,
+            xkb::MOD_INVALID,
+            "US keymap should define Shift"
+        );
         let shift = 1_u32 << shift_index;
 
         let mut repeat = KeyRepeat::default();
