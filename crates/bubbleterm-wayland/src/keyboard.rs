@@ -343,6 +343,11 @@ impl KeyRepeat {
         self.next_at = None;
     }
 
+    /// Returns the next scheduled repeat deadline, if a key is currently repeating.
+    pub fn next_deadline(&self) -> Option<Instant> {
+        self.next_at
+    }
+
     /// Returns one due key repeat and schedules the next interval without catch-up bursts.
     pub fn take_due(&mut self, now: Instant) -> Option<u32> {
         let key = self.active_key?;
