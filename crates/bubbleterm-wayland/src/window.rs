@@ -1681,21 +1681,35 @@ mod tests {
     }
 
     #[test]
-    fn keymap_replacement_cannot_replay_a_key_from_the_previous_layout() {
+    fn keymap_replacement_cannot_replay_or_release_a_key_from_the_previous_layout() {
         let now = Instant::now();
+        let mut lifecycle = KeyboardLifecycle::default();
         let mut repeat = KeyRepeat::default();
+
+        lifecycle.update_capability(true);
+        assert!(lifecycle.enter());
         repeat.configure(20, 250, now);
         repeat.press(21, true, now);
+        assert!(lifecycle.accepts_input());
 
         // The Keymap event clears repeat before installing either a new or
-        // unsupported keymap, so no physical key from the old map survives.
+        // unsupported keymap, without dropping keyboard focus.
         repeat.clear();
-
+        assert!(lifecycle.accepts_input());
         assert_eq!(repeat.take_due(now + Duration::from_secs(1)), None);
-        repeat.press(22, true, now + Duration::from_secs(1));
-        assert_eq!(repeat.take_due(now + Duration::from_millis(1_249)), None);
+
+        // A fresh press under the replacement keymap owns the new repeat.
+        let new_press = now + Duration::from_secs(1);
+        repeat.press(22, true, new_press);
+
+        // A delayed release for the old physical key must not cancel it.
+        repeat.release(21);
         assert_eq!(
-            repeat.take_due(now + Duration::from_millis(1_250)),
+            repeat.take_due(new_press + Duration::from_millis(249)),
+            None
+        );
+        assert_eq!(
+            repeat.take_due(new_press + Duration::from_millis(250)),
             Some(22)
         );
     }
