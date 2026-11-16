@@ -1227,11 +1227,7 @@ mod tests {
         // A delayed Modifiers event from the previous focus must be ignored,
         // even though the same keyboard proxy is still available.
         if lifecycle.accepts_input()
-            && accepts_keyboard_proxy_event(
-                lifecycle.available,
-                Some(&old_proxy_id),
-                &old_proxy_id,
-            )
+            && accepts_keyboard_proxy_event(lifecycle.available, Some(&old_proxy_id), &old_proxy_id)
         {
             modifier_snapshot = Some((u32::MAX, u32::MAX, u32::MAX, u32::MAX));
         }
