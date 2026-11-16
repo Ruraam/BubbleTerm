@@ -662,6 +662,51 @@ mod tests {
     }
 
     #[test]
+    fn replacing_keymap_discards_the_previous_modifier_snapshot() {
+        let mut keyboard = keyboard_with_layouts("de");
+        let keymap = keyboard
+            .keymap
+            .as_ref()
+            .expect("keymap should be installed");
+        let modifier_mask = |name: &str| {
+            let index = keymap.mod_get_index(name);
+            assert_ne!(index, xkb::MOD_INVALID, "missing {name} modifier");
+            1_u32 << index
+        };
+        let old_modifiers = modifier_mask("Shift")
+            | modifier_mask("Control")
+            | modifier_mask("Mod1")
+            | modifier_mask("Mod5");
+
+        // Simulate a compositor snapshot with every relevant modifier active.
+        keyboard.update_modifiers(old_modifiers, 0, 0, 0);
+        assert_eq!(keyboard.translate(18, false), Some("€".as_bytes().to_vec()));
+        assert_eq!(
+            keyboard.translate(103, false).as_deref(),
+            Some(b"\\x1b[1;8A".as_slice())
+        );
+
+        // Installing a replacement keymap creates a fresh XKB state. No part
+        // of the old Shift/Ctrl/Alt/AltGr snapshot may leak into the new map.
+        install_test_keymap(&mut keyboard, "de");
+        assert_eq!(keyboard.translate(18, false), Some(b"e".to_vec()));
+        assert_eq!(
+            keyboard.translate(103, false).as_deref(),
+            Some(b"\\x1b[A".as_slice())
+        );
+
+        // Only a fresh compositor snapshot may activate modifiers again.
+        let keymap = keyboard
+            .keymap
+            .as_ref()
+            .expect("replacement keymap should be installed");
+        let mod5 = keymap.mod_get_index("Mod5");
+        assert_ne!(mod5, xkb::MOD_INVALID);
+        keyboard.update_modifiers(1_u32 << mod5, 0, 0, 0);
+        assert_eq!(keyboard.translate(18, false), Some("€".as_bytes().to_vec()));
+    }
+
+    #[test]
     fn key_repeat_after_keymap_replacement_uses_only_the_new_layout() {
         let start = Instant::now();
         let mut keyboard = keyboard_with_layouts("us");
