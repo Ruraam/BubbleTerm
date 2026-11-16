@@ -1219,12 +1219,9 @@ mod tests {
         // The first keymap and its fresh AltGr snapshot produce the Euro sign.
         xkb.install_test_layout("de");
         let mod5 = xkb
-            .keymap
-            .as_ref()
-            .expect("German keymap should be installed")
-            .mod_get_index("Mod5");
-        assert_ne!(mod5, xkbcommon::xkb::MOD_INVALID);
-        xkb.update_modifiers(1_u32 << mod5, 0, 0, 0);
+            .test_modifier_mask("Mod5")
+            .expect("German keymap should define Mod5");
+        xkb.update_modifiers(mod5, 0, 0, 0);
         let translated = if lifecycle.accepts_input() {
             xkb.translate(18, false)
         } else {
@@ -1244,12 +1241,9 @@ mod tests {
 
         // The next compositor snapshot is authoritative for subsequent keys.
         let mod5 = xkb
-            .keymap
-            .as_ref()
-            .expect("replacement keymap should be installed")
-            .mod_get_index("Mod5");
-        assert_ne!(mod5, xkbcommon::xkb::MOD_INVALID);
-        xkb.update_modifiers(1_u32 << mod5, 0, 0, 0);
+            .test_modifier_mask("Mod5")
+            .expect("replacement German keymap should define Mod5");
+        xkb.update_modifiers(mod5, 0, 0, 0);
         let translated = if lifecycle.accepts_input() {
             xkb.translate(18, false)
         } else {
