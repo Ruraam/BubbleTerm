@@ -306,11 +306,11 @@ impl KeyRepeat {
         self.rate = u32::try_from(rate).unwrap_or(0).min(MAX_KEY_REPEAT_RATE);
         self.delay = Duration::from_millis(u64::try_from(delay_ms).unwrap_or(0));
         self.next_at = if self.rate > 0 && self.active_key.is_some() {
-            Some(now + self.delay)
+            now.checked_add(self.delay)
         } else {
             None
         };
-        if self.rate == 0 {
+        if self.rate == 0 || (self.active_key.is_some() && self.next_at.is_none()) {
             self.active_key = None;
         }
     }
@@ -318,8 +318,12 @@ impl KeyRepeat {
     /// Starts repeating a pressed key only when XKB says it is repeatable.
     pub fn press(&mut self, key: u32, repeatable: bool, now: Instant) {
         if repeatable && self.rate > 0 {
-            self.active_key = Some(key);
-            self.next_at = Some(now + self.delay);
+            if let Some(deadline) = now.checked_add(self.delay) {
+                self.active_key = Some(key);
+                self.next_at = Some(deadline);
+            } else {
+                self.clear();
+            }
         }
         // A non-repeatable key (for example Shift or Ctrl) must not cancel
         // an already-held repeatable key. Its modifier state is applied by
@@ -348,7 +352,11 @@ impl KeyRepeat {
         }
 
         let interval = Duration::from_nanos(1_000_000_000_u64 / u64::from(self.rate).max(1));
-        self.next_at = Some(now + interval.max(Duration::from_nanos(1)));
+        let Some(next_at) = now.checked_add(interval.max(Duration::from_nanos(1))) else {
+            self.clear();
+            return None;
+        };
+        self.next_at = Some(next_at);
         Some(key)
     }
 }
@@ -929,6 +937,22 @@ mod tests {
         repeat.press(30, true, start);
 
         assert_eq!(repeat.take_due(start), Some(30));
+    }
+
+    #[test]
+    fn maximum_compositor_repeat_delay_is_handled_without_overflow() {
+        let start = Instant::now();
+        let delay = Duration::from_millis(i32::MAX as u64);
+        let deadline = start
+            .checked_add(delay)
+            .expect("maximum wl_keyboard delay should fit in Instant");
+
+        let mut repeat = KeyRepeat::default();
+        repeat.configure(20, i32::MAX, start);
+        repeat.press(30, true, start);
+
+        assert_eq!(repeat.take_due(deadline - Duration::from_millis(1)), None);
+        assert_eq!(repeat.take_due(deadline), Some(30));
     }
 
     #[test]
