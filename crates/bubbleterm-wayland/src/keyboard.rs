@@ -683,7 +683,7 @@ mod tests {
         assert_eq!(keyboard.translate(18, false), Some("€".as_bytes().to_vec()));
         assert_eq!(
             keyboard.translate(103, false).as_deref(),
-            Some(b"\\x1b[1;8A".as_slice())
+            Some(b"\x1b[1;8A".as_slice())
         );
 
         // Installing a replacement keymap creates a fresh XKB state. No part
@@ -692,7 +692,7 @@ mod tests {
         assert_eq!(keyboard.translate(18, false), Some(b"e".to_vec()));
         assert_eq!(
             keyboard.translate(103, false).as_deref(),
-            Some(b"\\x1b[A".as_slice())
+            Some(b"\x1b[A".as_slice())
         );
 
         // Only a fresh compositor snapshot may activate modifiers again.
