@@ -1218,6 +1218,7 @@ mod tests {
         assert!(lifecycle.enter());
         assert!(lifecycle.accepts_input());
         modifier_snapshot = Some((1_u32, 0_u32, 0_u32, 0_u32));
+        assert_eq!(modifier_snapshot, Some((1, 0, 0, 0)));
 
         // Leave invalidates the previous focus snapshot immediately.
         assert!(lifecycle.leave());
