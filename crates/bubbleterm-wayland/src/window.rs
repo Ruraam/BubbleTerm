@@ -1208,6 +1208,67 @@ mod tests {
     }
 
     #[test]
+    fn delayed_modifiers_after_leave_cannot_restore_the_previous_focus_state() {
+        let old_proxy_id = 10_u32;
+        let replacement_proxy_id = 11_u32;
+        let mut lifecycle = KeyboardLifecycle::default();
+        let mut modifier_snapshot = None;
+
+        lifecycle.update_capability(true);
+        assert!(lifecycle.enter());
+        assert!(lifecycle.accepts_input());
+        modifier_snapshot = Some((1_u32, 0_u32, 0_u32, 0_u32));
+
+        // Leave invalidates the previous focus snapshot immediately.
+        assert!(lifecycle.leave());
+        modifier_snapshot = None;
+
+        // A delayed Modifiers event from the previous focus must be ignored,
+        // even though the same keyboard proxy is still available.
+        if lifecycle.accepts_input()
+            && accepts_keyboard_proxy_event(
+                lifecycle.available,
+                Some(&old_proxy_id),
+                &old_proxy_id,
+            )
+        {
+            modifier_snapshot = Some((u32::MAX, u32::MAX, u32::MAX, u32::MAX));
+        }
+        assert_eq!(modifier_snapshot, None);
+
+        // Reconnection also rejects the old proxy, including after the new
+        // keyboard has entered its own focused state.
+        assert_eq!(
+            lifecycle.update_capability(false),
+            CapabilityChange::Removed
+        );
+        assert_eq!(lifecycle.update_capability(true), CapabilityChange::Added);
+        assert!(lifecycle.enter());
+        if lifecycle.accepts_input()
+            && accepts_keyboard_proxy_event(
+                lifecycle.available,
+                Some(&replacement_proxy_id),
+                &old_proxy_id,
+            )
+        {
+            modifier_snapshot = Some((u32::MAX, 0, 0, 0));
+        }
+        assert_eq!(modifier_snapshot, None);
+
+        // The replacement proxy's fresh snapshot is accepted normally.
+        if lifecycle.accepts_input()
+            && accepts_keyboard_proxy_event(
+                lifecycle.available,
+                Some(&replacement_proxy_id),
+                &replacement_proxy_id,
+            )
+        {
+            modifier_snapshot = Some((2, 0, 0, 0));
+        }
+        assert_eq!(modifier_snapshot, Some((2, 0, 0, 0)));
+    }
+
+    #[test]
     fn input_is_accepted_only_while_keyboard_is_available_and_focused() {
         let mut lifecycle = KeyboardLifecycle::default();
         assert!(!lifecycle.accepts_input());
