@@ -826,7 +826,7 @@ mod tests {
         accepts_active_seat_proxy_event, accepts_keyboard_proxy_event, checked_buffer_layout,
         has_keyboard_capability, key_repeat_poll_timeout, supports_xkb_keymap, take_pty_events,
     };
-    use crate::keyboard::KeyRepeat;
+    use crate::keyboard::{KeyRepeat, XkbKeyboard};
     use bubbleterm_pty::PtyOutputEvent;
     use std::time::{Duration, Instant};
     use wayland_client::WEnum;
@@ -1205,6 +1205,57 @@ mod tests {
             modifier_snapshot = Some((4, 0, 0, 0));
         }
         assert_eq!(modifier_snapshot, Some((4, 0, 0, 0)));
+    }
+
+    #[test]
+    fn keymap_modifier_and_key_events_use_only_the_current_xkb_state() {
+        let mut lifecycle = KeyboardLifecycle::default();
+        let mut xkb = XkbKeyboard::new().expect("XKB context should be available");
+
+        lifecycle.update_capability(true);
+        assert!(lifecycle.enter());
+        assert!(lifecycle.accepts_input());
+
+        // The first keymap and its fresh AltGr snapshot produce the Euro sign.
+        xkb.install_test_layout("de");
+        let mod5 = xkb
+            .keymap
+            .as_ref()
+            .expect("German keymap should be installed")
+            .mod_get_index("Mod5");
+        assert_ne!(mod5, xkbcommon::xkb::MOD_INVALID);
+        xkb.update_modifiers(1_u32 << mod5, 0, 0, 0);
+        let translated = if lifecycle.accepts_input() {
+            xkb.translate(18, false)
+        } else {
+            None
+        };
+        assert_eq!(translated, Some("€".as_bytes().to_vec()));
+
+        // A replacement keymap resets the XKB modifier state. A Key arriving
+        // before the replacement's fresh Modifiers snapshot must be unshifted.
+        xkb.install_test_layout("de");
+        let translated = if lifecycle.accepts_input() {
+            xkb.translate(18, false)
+        } else {
+            None
+        };
+        assert_eq!(translated, Some(b"e".to_vec()));
+
+        // The next compositor snapshot is authoritative for subsequent keys.
+        let mod5 = xkb
+            .keymap
+            .as_ref()
+            .expect("replacement keymap should be installed")
+            .mod_get_index("Mod5");
+        assert_ne!(mod5, xkbcommon::xkb::MOD_INVALID);
+        xkb.update_modifiers(1_u32 << mod5, 0, 0, 0);
+        let translated = if lifecycle.accepts_input() {
+            xkb.translate(18, false)
+        } else {
+            None
+        };
+        assert_eq!(translated, Some("€".as_bytes().to_vec()));
     }
 
     #[test]
