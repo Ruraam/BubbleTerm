@@ -785,10 +785,7 @@ mod tests {
         // Releasing the latest key stops repeat rather than reviving key 30,
         // which remains physically held.
         repeat.release(31);
-        assert_eq!(
-            repeat.take_due(newer_press + Duration::from_secs(1)),
-            None
-        );
+        assert_eq!(repeat.take_due(newer_press + Duration::from_secs(1)), None);
 
         // A subsequent fresh press takes ownership normally.
         let fresh_press = newer_press + Duration::from_secs(1);
