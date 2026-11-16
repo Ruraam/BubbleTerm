@@ -31,6 +31,7 @@ const INITIAL_WIDTH: u32 = 800;
 const INITIAL_HEIGHT: u32 = 600;
 const MAX_BUFFER_BYTES: u32 = 64 * 1024 * 1024;
 const MAX_BUFFER_DIMENSION: u32 = 8192;
+const MAX_EVENT_POLL_WAIT_MS: u16 = 8;
 const WINDOW_TITLE: &str = "BubbleTerm";
 
 /// Runs one native Wayland window until the compositor requests it to close.
@@ -145,7 +146,8 @@ pub fn run_wayland_window(session: PtySession, cell_metrics: CellMetrics) -> Res
             continue;
         };
         let mut poll_fds = [PollFd::new(read_guard.connection_fd(), PollFlags::POLLIN)];
-        let poll_result = match poll(&mut poll_fds, 8_u16) {
+        let poll_timeout = key_repeat_poll_timeout(&state.key_repeat, Instant::now());
+        let poll_result = match poll(&mut poll_fds, poll_timeout) {
             Ok(result) => result,
             // A signal may interrupt poll without indicating a broken
             // Wayland connection. Dropping the read guard cancels this
@@ -172,6 +174,21 @@ pub fn run_wayland_window(session: PtySession, cell_metrics: CellMetrics) -> Res
     // WindowState owns both the active seat and keyboard proxies. Their
     // protocol destructors are sent explicitly when a registry global vanishes.
     Ok(())
+}
+
+/// Bound the Wayland wait by the next repeat deadline without busy-waiting.
+///
+/// The poll API accepts millisecond timeouts, so round a fractional millisecond
+/// up. A due deadline returns zero and is dispatched at the top of the next
+/// loop iteration; an inactive timer retains the normal 8 ms responsiveness.
+fn key_repeat_poll_timeout(repeat: &KeyRepeat, now: Instant) -> u16 {
+    let Some(deadline) = repeat.next_deadline() else {
+        return MAX_EVENT_POLL_WAIT_MS;
+    };
+    let remaining = deadline.saturating_duration_since(now);
+    let timeout_ms = remaining.as_nanos().div_ceil(1_000_000);
+    u16::try_from(timeout_ms.min(u128::from(MAX_EVENT_POLL_WAIT_MS)))
+        .expect("bounded poll timeout always fits u16")
 }
 
 /// Emit at most one due repeat per event-loop iteration.
@@ -774,12 +791,44 @@ mod tests {
     use super::{
         CapabilityChange, KeyboardLifecycle, SeatGlobal, SeatRegistry,
         accepts_active_seat_proxy_event, accepts_keyboard_proxy_event, checked_buffer_layout,
+        key_repeat_poll_timeout,
         has_keyboard_capability, supports_xkb_keymap,
     };
     use crate::keyboard::KeyRepeat;
     use std::time::{Duration, Instant};
     use wayland_client::WEnum;
     use wayland_client::protocol::{wl_keyboard, wl_seat};
+
+    #[test]
+    fn repeat_poll_timeout_tracks_deadline_and_rounds_up_submilliseconds() {
+        let start = Instant::now();
+        let mut repeat = KeyRepeat::default();
+        repeat.configure(20, 500, start);
+        repeat.press(30, true, start);
+
+        assert_eq!(key_repeat_poll_timeout(&repeat, start), 8);
+        assert_eq!(
+            key_repeat_poll_timeout(&repeat, start + Duration::from_millis(497)),
+            3
+        );
+        assert_eq!(
+            key_repeat_poll_timeout(
+                &repeat,
+                start + Duration::from_millis(497) + Duration::from_micros(500),
+            ),
+            3
+        );
+        assert_eq!(
+            key_repeat_poll_timeout(&repeat, start + Duration::from_millis(500)),
+            0
+        );
+    }
+
+    #[test]
+    fn inactive_repeat_keeps_default_poll_timeout() {
+        let repeat = KeyRepeat::default();
+        assert_eq!(key_repeat_poll_timeout(&repeat, Instant::now()), 8);
+    }
 
     #[test]
     fn registers_first_seat() {
