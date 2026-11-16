@@ -791,8 +791,7 @@ mod tests {
     use super::{
         CapabilityChange, KeyboardLifecycle, SeatGlobal, SeatRegistry,
         accepts_active_seat_proxy_event, accepts_keyboard_proxy_event, checked_buffer_layout,
-        key_repeat_poll_timeout,
-        has_keyboard_capability, supports_xkb_keymap,
+        has_keyboard_capability, key_repeat_poll_timeout, supports_xkb_keymap,
     };
     use crate::keyboard::KeyRepeat;
     use std::time::{Duration, Instant};
