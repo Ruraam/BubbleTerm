@@ -662,6 +662,40 @@ mod tests {
     }
 
     #[test]
+    fn key_repeat_after_keymap_replacement_uses_only_the_new_layout() {
+        let start = Instant::now();
+        let mut keyboard = keyboard_with_layouts("us");
+        let mut repeat = KeyRepeat::default();
+        repeat.configure(20, 250, start);
+
+        // Linux evdev KEY_Y (21) is Y in the initial US layout.
+        assert_eq!(keyboard.translate(21, false), Some(b"y".to_vec()));
+        assert!(keyboard.is_repeatable(21));
+        repeat.press(21, keyboard.is_repeatable(21), start);
+
+        // The Wayland Keymap handler clears repeat before installing the map.
+        install_test_keymap(&mut keyboard, "de");
+        repeat.clear();
+
+        // A due repeat from the previous layout must not survive replacement.
+        assert_eq!(repeat.take_due(start + Duration::from_secs(1)), None);
+        // The same physical keycode now resolves through the German layout.
+        assert_eq!(keyboard.translate(21, false), Some(b"z".to_vec()));
+
+        let new_press = start + Duration::from_secs(1);
+        repeat.press(21, keyboard.is_repeatable(21), new_press);
+        assert_eq!(
+            repeat.take_due(new_press + Duration::from_millis(249)),
+            None
+        );
+        assert_eq!(
+            repeat.take_due(new_press + Duration::from_millis(250)),
+            Some(21)
+        );
+        assert_eq!(keyboard.translate(21, false), Some(b"z".to_vec()));
+    }
+
+    #[test]
     fn replacing_keymap_resets_partial_compose_and_uses_new_layout() {
         let mut keyboard = keyboard_with_compose_table(TEST_COMPOSE_TABLE);
         install_test_keymap(&mut keyboard, "us");
