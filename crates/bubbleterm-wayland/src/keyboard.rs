@@ -537,6 +537,34 @@ mod tests {
     }
 
     #[test]
+    fn modifier_events_before_keymap_are_not_replayed_into_new_xkb_state() {
+        let mut keyboard = XkbKeyboard::new().expect("XKB context should be available");
+
+        // A modifier event received before a keymap has no XKB state to update.
+        keyboard.update_modifiers(u32::MAX, u32::MAX, u32::MAX, u32::MAX);
+        assert_eq!(keyboard.translate(18, false), None);
+
+        install_test_keymap(&mut keyboard, "de");
+
+        // The pre-keymap snapshot must not be replayed when a keymap appears.
+        assert_eq!(keyboard.translate(18, false), Some(b"e".to_vec()));
+
+        // A fresh snapshot after keymap installation is authoritative.
+        let keymap = keyboard
+            .keymap
+            .as_ref()
+            .expect("keymap should be installed");
+        let mod5 = keymap.mod_get_index("Mod5");
+        assert_ne!(mod5, xkb::MOD_INVALID);
+        keyboard.update_modifiers(1_u32 << mod5, 0, 0, 0);
+        assert_eq!(keyboard.translate(18, false), Some("€".as_bytes().to_vec()));
+
+        // A later empty snapshot must clear AltGr before the next key.
+        keyboard.update_modifiers(0, 0, 0, 0);
+        assert_eq!(keyboard.translate(18, false), Some(b"e".to_vec()));
+    }
+
+    #[test]
     fn altgr_modifier_snapshot_selects_third_level_unicode_symbol() {
         let mut keyboard = keyboard_with_layouts("de");
         let keymap = keyboard
