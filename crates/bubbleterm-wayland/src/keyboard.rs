@@ -767,6 +767,43 @@ mod tests {
     }
 
     #[test]
+    fn releasing_latest_key_does_not_resume_an_older_held_key() {
+        let start = Instant::now();
+        let mut repeat = KeyRepeat::default();
+        repeat.configure(20, 300, start);
+
+        // Both keys are held, but only the most recently pressed key repeats.
+        repeat.press(30, true, start);
+        let newer_press = start + Duration::from_millis(100);
+        repeat.press(31, true, newer_press);
+
+        assert_eq!(
+            repeat.take_due(newer_press + Duration::from_millis(300)),
+            Some(31)
+        );
+
+        // Releasing the latest key stops repeat rather than reviving key 30,
+        // which remains physically held.
+        repeat.release(31);
+        assert_eq!(
+            repeat.take_due(newer_press + Duration::from_secs(1)),
+            None
+        );
+
+        // A subsequent fresh press takes ownership normally.
+        let fresh_press = newer_press + Duration::from_secs(1);
+        repeat.press(32, true, fresh_press);
+        assert_eq!(
+            repeat.take_due(fresh_press + Duration::from_millis(299)),
+            None
+        );
+        assert_eq!(
+            repeat.take_due(fresh_press + Duration::from_millis(300)),
+            Some(32)
+        );
+    }
+
+    #[test]
     fn modifier_press_does_not_cancel_an_active_repeat() {
         let start = Instant::now();
         let mut repeat = KeyRepeat::default();
