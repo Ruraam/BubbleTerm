@@ -1212,12 +1212,11 @@ mod tests {
         let old_proxy_id = 10_u32;
         let replacement_proxy_id = 11_u32;
         let mut lifecycle = KeyboardLifecycle::default();
-        let mut modifier_snapshot = None;
 
         lifecycle.update_capability(true);
         assert!(lifecycle.enter());
         assert!(lifecycle.accepts_input());
-        modifier_snapshot = Some((1_u32, 0_u32, 0_u32, 0_u32));
+        let mut modifier_snapshot = Some((1_u32, 0_u32, 0_u32, 0_u32));
         assert_eq!(modifier_snapshot, Some((1, 0, 0, 0)));
 
         // Leave invalidates the previous focus snapshot immediately.
