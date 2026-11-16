@@ -841,6 +841,39 @@ mod tests {
     }
 
     #[test]
+    fn key_repeat_translation_uses_the_latest_modifier_snapshot() {
+        let start = Instant::now();
+        let mut keyboard = keyboard_with_layouts("us");
+        let keymap = keyboard
+            .keymap
+            .as_ref()
+            .expect("keymap should be installed");
+        let shift_index = keymap.mod_get_index("Shift");
+        assert_ne!(shift_index, xkb::MOD_INVALID, "US keymap should define Shift");
+        let shift = 1_u32 << shift_index;
+
+        let mut repeat = KeyRepeat::default();
+        repeat.configure(20, 300, start);
+        repeat.press(30, true, start);
+
+        // The initial press is translated with the current unshifted state.
+        assert_eq!(
+            repeat.take_due(start + Duration::from_millis(300)),
+            Some(30)
+        );
+        assert_eq!(keyboard.translate(30, false), Some(b"a".to_vec()));
+
+        // A fresh compositor snapshot must affect the next repeat, rather
+        // than reusing bytes captured when the key was first pressed.
+        keyboard.update_modifiers(shift, 0, 0, 0);
+        assert_eq!(
+            repeat.take_due(start + Duration::from_millis(350)),
+            Some(30)
+        );
+        assert_eq!(keyboard.translate(30, false), Some(b"A".to_vec()));
+    }
+
+    #[test]
     fn key_repeat_obeys_delay_rate_and_release() {
         let start = Instant::now();
         let mut repeat = KeyRepeat::default();
