@@ -32,6 +32,7 @@ const INITIAL_HEIGHT: u32 = 600;
 const MAX_BUFFER_BYTES: u32 = 64 * 1024 * 1024;
 const MAX_BUFFER_DIMENSION: u32 = 8192;
 const MAX_EVENT_POLL_WAIT_MS: u16 = 8;
+const MAX_PTY_EVENTS_PER_TICK: usize = 16;
 const WINDOW_TITLE: &str = "BubbleTerm";
 
 /// Runs one native Wayland window until the compositor requests it to close.
@@ -129,7 +130,8 @@ pub fn run_wayland_window(session: PtySession, cell_metrics: CellMetrics) -> Res
             .dispatch_pending(&mut state)
             .context("Wayland pending-event dispatch failed")?;
         dispatch_key_repeat(&mut state);
-        if drain_pty_output(&mut state) && state.configured {
+        let pty_drain = drain_pty_output(&mut state);
+        if pty_drain.changed && state.configured {
             let (width, height) = state.current_size;
             if width > 0 && height > 0 {
                 present_surface_buffer(&mut state, width as u32, height as u32, &queue_handle)?;
@@ -142,6 +144,11 @@ pub fn run_wayland_window(session: PtySession, cell_metrics: CellMetrics) -> Res
         event_queue
             .flush()
             .context("Wayland request flush failed")?;
+        // If the PTY queue is still busy, immediately return to Wayland
+        // dispatch and key-repeat instead of sleeping while output is queued.
+        if pty_drain.budget_exhausted {
+            continue;
+        }
         let Some(read_guard) = event_queue.prepare_read() else {
             continue;
         };
@@ -220,27 +227,53 @@ fn dispatch_key_repeat(state: &mut WindowState) {
 ///
 /// This function is called only on the Wayland thread and never waits for
 /// additional PTY data. The reader worker owns all blocking reads.
-fn drain_pty_output(state: &mut WindowState) -> bool {
-    let mut changed = false;
-    loop {
-        match state.pty_output.try_recv() {
-            Ok(PtyOutputEvent::Data(bytes)) => {
+#[derive(Debug, Default, PartialEq, Eq)]
+struct PtyDrainResult {
+    changed: bool,
+    budget_exhausted: bool,
+}
+
+/// Take a bounded batch so sustained PTY output cannot starve Wayland events.
+fn take_pty_events(
+    mut try_recv: impl FnMut() -> std::result::Result<PtyOutputEvent, TryRecvError>,
+) -> (Vec<PtyOutputEvent>, bool) {
+    let mut events = Vec::with_capacity(MAX_PTY_EVENTS_PER_TICK);
+    while events.len() < MAX_PTY_EVENTS_PER_TICK {
+        match try_recv() {
+            Ok(event) => events.push(event),
+            Err(TryRecvError::Empty | TryRecvError::Disconnected) => return (events, false),
+        }
+    }
+
+    (events, true)
+}
+
+fn drain_pty_output(state: &mut WindowState) -> PtyDrainResult {
+    let (events, budget_exhausted) = take_pty_events(|| state.pty_output.try_recv());
+    let mut result = PtyDrainResult {
+        changed: false,
+        budget_exhausted,
+    };
+
+    for event in events {
+        match event {
+            PtyOutputEvent::Data(bytes) => {
                 state.terminal.process(&bytes);
-                changed = true;
+                result.changed = true;
             }
-            Ok(PtyOutputEvent::Closed) => {
+            PtyOutputEvent::Closed => {
                 state.pty_closed = true;
                 break;
             }
-            Ok(PtyOutputEvent::Error(error)) => {
+            PtyOutputEvent::Error(error) => {
                 state.event_error = Some(format!("PTY output reader failed: {error}"));
                 state.running = false;
                 break;
             }
-            Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
         }
     }
-    changed
+
+    result
 }
 
 fn checked_buffer_layout(width: u32, height: u32) -> Result<(i32, i32, i32, i32)> {
@@ -789,10 +822,11 @@ impl Dispatch<xdg_toplevel::XdgToplevel, ()> for WindowState {
 #[cfg(test)]
 mod tests {
     use super::{
-        CapabilityChange, KeyboardLifecycle, SeatGlobal, SeatRegistry,
+        CapabilityChange, KeyboardLifecycle, SeatGlobal, SeatRegistry, take_pty_events,
         accepts_active_seat_proxy_event, accepts_keyboard_proxy_event, checked_buffer_layout,
         has_keyboard_capability, key_repeat_poll_timeout, supports_xkb_keymap,
     };
+    use bubbleterm_pty::PtyOutputEvent;
     use crate::keyboard::KeyRepeat;
     use std::time::{Duration, Instant};
     use wayland_client::WEnum;
@@ -827,6 +861,34 @@ mod tests {
     fn inactive_repeat_keeps_default_poll_timeout() {
         let repeat = KeyRepeat::default();
         assert_eq!(key_repeat_poll_timeout(&repeat, Instant::now()), 8);
+    }
+
+    #[test]
+    fn pty_output_batch_yields_after_bounded_work_without_losing_order() {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        for byte in 0_u8..20 {
+            sender
+                .send(PtyOutputEvent::Data(vec![byte]))
+                .expect("test receiver should remain available");
+        }
+        sender
+            .send(PtyOutputEvent::Closed)
+            .expect("close event should be queued");
+
+        let (first_batch, yielded) = take_pty_events(|| receiver.try_recv());
+        assert!(yielded, "a full batch must yield to Wayland dispatch");
+        assert_eq!(first_batch.len(), 16);
+        for (expected, event) in (0_u8..16).zip(first_batch) {
+            assert_eq!(event, PtyOutputEvent::Data(vec![expected]));
+        }
+
+        let (second_batch, yielded) = take_pty_events(|| receiver.try_recv());
+        assert!(!yielded, "the remaining short batch should drain fully");
+        assert_eq!(second_batch.len(), 5);
+        for (expected, event) in (16_u8..20).zip(second_batch.iter().take(4)) {
+            assert_eq!(*event, PtyOutputEvent::Data(vec![expected]));
+        }
+        assert_eq!(second_batch.last(), Some(&PtyOutputEvent::Closed));
     }
 
     #[test]
