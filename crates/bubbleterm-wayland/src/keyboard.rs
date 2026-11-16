@@ -182,6 +182,23 @@ impl XkbKeyboard {
         Ok(())
     }
 
+    #[cfg(test)]
+    pub(crate) fn install_test_layout(&mut self, layout: &str) {
+        let keymap = Keymap::new_from_names(
+            &self.context,
+            &"",
+            &"",
+            layout,
+            &"",
+            None,
+            xkb::KEYMAP_COMPILE_NO_FLAGS,
+        )
+        .expect("test XKB keymap should compile");
+        self.reset_compose();
+        self.state = Some(State::new(&keymap));
+        self.keymap = Some(keymap);
+    }
+
     /// Applies the modifier and layout snapshot sent by wl_keyboard.
     pub fn update_modifiers(&mut self, depressed: u32, latched: u32, locked: u32, group: u32) {
         if let Some(state) = &mut self.state {
